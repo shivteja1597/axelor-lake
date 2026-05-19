@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+  <selection name="lake.analytics.reports">
+    <option value="dim_employee">1. Curated Employee Data</option>
+    <option value="employee_role_summary">2. Employee Summary by Role</option>
+    <option value="employee_manager_summary">3. Managers by Department</option>
+    <option value="employee_department_salary_summary">4. Department Salary Bands</option>
+  </selection>
+
+  <form name="lake-data-profiling-form" title="Data Profiling"
+    model="com.axelor.utils.db.Wizard" width="large" canSave="false" canNew="false" canCopy="false"
+    onNew="action-group-lake-profile-on-new">
+    <panel name="analysisStatePanel" hidden="true" colSpan="12">
+      <field name="$analysisPage" type="integer"/>
+      <field name="$analysisPageSize" type="integer"/>
+    </panel>
+    <panel name="filterPanel" title="Filters" itemSpan="6" colSpan="12">
+      <field name="$departmentSet" title="Department" type="many-to-many"
+        target="com.axelor.lake.db.LakeDepartment" grid-view="lake-department-grid"
+        form-view="lake-department-form" canNew="false" canEdit="false" widget="Tags"
+        onChange="action-group-lake-profile-filter-change"/>
+      <field name="$roleSet" title="Role" type="many-to-many"
+        target="com.axelor.lake.db.LakeRole" grid-view="lake-role-grid" form-view="lake-role-form"
+        canNew="false" canEdit="false" widget="Tags"
+        onChange="action-group-lake-profile-filter-change"/>
+      <field name="$statusSet" title="Status" type="many-to-many"
+        target="com.axelor.lake.db.LakeStatus" grid-view="lake-status-grid"
+        form-view="lake-status-form" canNew="false" canEdit="false" widget="Tags"
+        onChange="action-group-lake-profile-filter-change"/>
+      <field name="$ageMin" type="integer" title="Age Min"
+        onChange="action-group-lake-profile-filter-change"/>
+      <field name="$ageMax" type="integer" title="Age Max"
+        onChange="action-group-lake-profile-filter-change"/>
+      <field name="$salaryMin" type="decimal" title="Salary Min"
+        onChange="action-group-lake-profile-filter-change"/>
+      <field name="$salaryMax" type="decimal" title="Salary Max"
+        onChange="action-group-lake-profile-filter-change"/>
+      <field name="$analysisReport" type="string" title="Analysis Report"
+        selection="lake.analytics.reports" onChange="action-group-lake-profile-filter-change"
+        colSpan="12"/>
+      <panel name="filterButtonsPanel" colSpan="12" itemSpan="6">
+        <button name="resetFiltersBtn" title="Reset All"
+          onClick="action-group-lake-profile-reset"/>
+      </panel>
+    </panel>
+
+    <panel-dashlet name="lakeColumnProfilePanel" title="Column Profiles" colSpan="12"
+      height="420" action="dashlet.lake.column.profile"/>
+    <panel-dashlet name="lakeEmployeeAnalysisPanel" title="Employee Analysis"
+      colSpan="12" height="520" action="dashlet.lake.filtered.employee.table"/>
+    <panel name="analysisPagingPanel" colSpan="12" itemSpan="4">
+      <button name="analysisPrevPageBtn" title="Previous Page"
+        onClick="action-group-lake-profile-prev-page"/>
+      <field name="analysisPageDisplay" title="Page" readonly="true"/>
+      <button name="analysisNextPageBtn" title="Next Page"
+        onClick="action-group-lake-profile-next-page"/>
+    </panel>
+  </form>
+
+  <action-group name="action-group-lake-profile-on-new">
+    <action name="action-record-lake-profile-default-page"/>
+    <action name="action-attrs-lake-profile-refresh-dashlets"/>
+  </action-group>
+
+  <action-group name="action-group-lake-profile-filter-change">
+    <action name="action-record-lake-profile-reset-page"/>
+    <action name="action-attrs-lake-profile-refresh-dashlets"/>
+  </action-group>
+
+  <action-group name="action-group-lake-profile-next-page">
+    <action name="action-record-lake-profile-next-page"/>
+    <action name="action-attrs-lake-profile-refresh-dashlets"/>
+  </action-group>
+
+  <action-group name="action-group-lake-profile-prev-page">
+    <action name="action-record-lake-profile-prev-page"/>
+    <action name="action-attrs-lake-profile-refresh-dashlets"/>
+  </action-group>
+
+  <action-group name="action-group-lake-profile-reset">
+    <action name="action-record-lake-profile-reset-filters"/>
+    <action name="action-record-lake-profile-reset-page"/>
+    <action name="action-attrs-lake-profile-refresh-dashlets"/>
+  </action-group>
+
+  <action-attrs name="action-attrs-lake-profile-refresh-dashlets">
+    <attribute name="refresh" for="lakeColumnProfilePanel" expr="eval: true"/>
+    <attribute name="refresh" for="lakeEmployeeAnalysisPanel" expr="eval: true"/>
+  </action-attrs>
+
+  <action-record name="action-record-lake-profile-default-page"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$analysisReport" expr="eval: 'dim_employee'"/>
+    <field name="$analysisPage" expr="eval: 1"/>
+    <field name="analysisPageDisplay" expr="eval: 1"/>
+    <field name="$analysisPageSize" expr="eval: 100"/>
+  </action-record>
+
+  <action-record name="action-record-lake-profile-reset-page"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$analysisPage" expr="eval: 1"/>
+    <field name="analysisPageDisplay" expr="eval: 1"/>
+    <field name="$analysisPageSize" expr="eval: 100"/>
+  </action-record>
+
+  <action-record name="action-record-lake-profile-next-page"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$analysisPage" expr="eval: (analysisPageDisplay ?: 1) + 1"/>
+    <field name="analysisPageDisplay" expr="eval: (analysisPageDisplay ?: 1) + 1"/>
+    <field name="$analysisPageSize" expr="eval: ($analysisPageSize ?: 100)"/>
+  </action-record>
+
+  <action-record name="action-record-lake-profile-prev-page"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$analysisPage"
+      expr="eval: ((analysisPageDisplay ?: 1) > 1) ? ((analysisPageDisplay ?: 1) - 1) : 1"/>
+    <field name="analysisPageDisplay"
+      expr="eval: ((analysisPageDisplay ?: 1) > 1) ? ((analysisPageDisplay ?: 1) - 1) : 1"/>
+    <field name="$analysisPageSize" expr="eval: ($analysisPageSize ?: 100)"/>
+  </action-record>
+
+  <action-record name="action-record-lake-profile-reset-filters"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$departmentSet" expr="eval: null"/>
+    <field name="$roleSet" expr="eval: null"/>
+    <field name="$statusSet" expr="eval: null"/>
+    <field name="$ageMin" expr="eval: null"/>
+    <field name="$ageMax" expr="eval: null"/>
+    <field name="$salaryMin" expr="eval: null"/>
+    <field name="$salaryMax" expr="eval: null"/>
+    <field name="$analysisReport" expr="eval: 'dim_employee'"/>
+    <field name="$analysisPage" expr="eval: 1"/>
+    <field name="analysisPageDisplay" expr="eval: 1"/>
+    <field name="$analysisPageSize" expr="eval: 100"/>
+  </action-record>
+
+  <action-view name="lake.data.profiling.view" title="Data Profiling"
+    model="com.axelor.utils.db.Wizard">
+    <view type="form" name="lake-data-profiling-form"/>
+  </action-view>
+
+  <action-view name="dashlet.lake.column.profile" title="Column Profiles">
+    <view type="custom" name="custom.lake.column.profile"/>
+  </action-view>
+
+  <action-view name="dashlet.lake.filtered.employee.table" title="Employee Analysis">
+    <view type="custom" name="custom.lake.filtered.employee.table"/>
+  </action-view>
+
+  <form name="lake-customer-predictions-form" title="Customer Predictions"
+    model="com.axelor.utils.db.Wizard" width="large" canSave="false" canNew="false" canCopy="false"
+    onNew="action-group-lake-customer-on-new">
+    <panel name="customerPredictionStatePanel" hidden="true" colSpan="12">
+      <field name="$customerPage" type="integer"/>
+      <field name="$customerPageSize" type="integer"/>
+    </panel>
+    <panel name="customerPredictionInfoPanel" title="Customer Risk Predictions" colSpan="12">
+      <label
+        title="Upload customer CSV data from the dedicated menu and refresh this screen after the workflow completes."
+        colSpan="12"/>
+    </panel>
+    <panel name="customerPredictionActionPanel" colSpan="12" itemSpan="6">
+      <button name="refreshCustomerPredictionsBtn" title="Refresh Predictions"
+        onClick="action-attrs-lake-customer-refresh-dashlet"/>
+    </panel>
+    <panel-dashlet name="lakeCustomerPredictionSummaryPanel"
+      title="Prediction Summary" colSpan="12" height="390"
+      action="dashlet.lake.customer.predictions.summary"/>
+    <panel-dashlet name="lakeCustomerSegmentRiskMatrixPanel"
+      title="Customer Groups by Risk" colSpan="12" height="320"
+      action="dashlet.lake.customer.segment.risk.matrix"/>
+    <panel-dashlet name="lakeCustomerPredictionPanel" title="Prediction Table"
+      colSpan="12" height="420" action="dashlet.lake.customer.predictions.table"/>
+    <panel name="customerPredictionPagingPanel" colSpan="12" itemSpan="4">
+      <button name="customerPredictionPrevPageBtn" title="Previous Page"
+        onClick="action-group-lake-customer-prev-page"/>
+      <field name="customerPageDisplay" title="Page" readonly="true"/>
+      <button name="customerPredictionNextPageBtn" title="Next Page"
+        onClick="action-group-lake-customer-next-page"/>
+    </panel>
+  </form>
+
+  <action-group name="action-group-lake-customer-on-new">
+    <action name="action-record-lake-customer-default-page"/>
+    <action name="action-attrs-lake-customer-refresh-dashlet"/>
+  </action-group>
+
+  <action-group name="action-group-lake-customer-next-page">
+    <action name="action-record-lake-customer-next-page"/>
+    <action name="action-attrs-lake-customer-refresh-dashlet"/>
+  </action-group>
+
+  <action-group name="action-group-lake-customer-prev-page">
+    <action name="action-record-lake-customer-prev-page"/>
+    <action name="action-attrs-lake-customer-refresh-dashlet"/>
+  </action-group>
+
+  <action-attrs name="action-attrs-lake-customer-refresh-dashlet">
+    <attribute name="refresh" for="lakeCustomerPredictionSummaryPanel" expr="eval: true"/>
+    <attribute name="refresh" for="lakeCustomerSegmentRiskMatrixPanel" expr="eval: true"/>
+    <attribute name="refresh" for="lakeCustomerPredictionPanel" expr="eval: true"/>
+  </action-attrs>
+
+  <action-record name="action-record-lake-customer-default-page"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$customerPage" expr="eval: 1"/>
+    <field name="customerPageDisplay" expr="eval: 1"/>
+    <field name="$customerPageSize" expr="eval: 100"/>
+  </action-record>
+
+  <action-record name="action-record-lake-customer-next-page"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$customerPage" expr="eval: (customerPageDisplay ?: 1) + 1"/>
+    <field name="customerPageDisplay" expr="eval: (customerPageDisplay ?: 1) + 1"/>
+    <field name="$customerPageSize" expr="eval: ($customerPageSize ?: 100)"/>
+  </action-record>
+
+  <action-record name="action-record-lake-customer-prev-page"
+    model="com.axelor.utils.db.Wizard">
+    <field name="$customerPage"
+      expr="eval: ((customerPageDisplay ?: 1) > 1) ? ((customerPageDisplay ?: 1) - 1) : 1"/>
+    <field name="customerPageDisplay"
+      expr="eval: ((customerPageDisplay ?: 1) > 1) ? ((customerPageDisplay ?: 1) - 1) : 1"/>
+    <field name="$customerPageSize" expr="eval: ($customerPageSize ?: 100)"/>
+  </action-record>
+
+  <action-view name="lake.customer.predictions.view" title="Customer Predictions"
+    model="com.axelor.utils.db.Wizard">
+    <view type="form" name="lake-customer-predictions-form"/>
+  </action-view>
+
+  <action-view name="dashlet.lake.customer.predictions.table"
+    title="Customer Predictions">
+    <view type="custom" name="custom.lake.customer.predictions.table"/>
+  </action-view>
+
+  <action-view name="dashlet.lake.customer.predictions.summary"
+    title="Customer Prediction Summary">
+    <view type="custom" name="custom.lake.customer.predictions.summary"/>
+  </action-view>
+
+  <action-view name="dashlet.lake.customer.segment.risk.matrix"
+    title="Customer Groups by Risk">
+    <view type="custom" name="custom.lake.customer.segment.risk.matrix"/>
+  </action-view>
+
+</object-views>

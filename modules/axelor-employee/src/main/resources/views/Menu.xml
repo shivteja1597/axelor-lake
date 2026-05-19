@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+
+  <menuitem name="employee-menu-root" title="Employee Directory"/>
+
+
+  <menuitem name="employee-menu-employee" parent="employee-menu-root" title="Employees"
+    action="employee.employee.all"/>
+
+
+  <menuitem name="employee-menu-department" parent="employee-menu-root" title="Departments"
+    action="employee.department.all"/>
+
+
+  <menuitem name="employee-menu-role" parent="employee-menu-root" title="Roles"
+    action="employee.role.all"/>
+
+  <menuitem name="employee-menu-import" parent="employee-menu-root" title="Imports"
+    action="admin.root.import"/>
+
+
+  <action-view name="employee.employee.all" title="Employees"
+    model="com.axelor.employee.db.Employee">
+
+    <view type="grid" name="employee-employee-grid"/>
+    <view type="form" name="employee-employee-form"/>
+
+  </action-view>
+
+
+  <action-view name="employee.department.all" title="Departments"
+    model="com.axelor.employee.db.EmployeeDepartment">
+
+    <view type="grid" name="employee-department-grid"/>
+    <view type="form" name="employee-department-form"/>
+
+  </action-view>
+
+
+  <action-view name="employee.role.all" title="Roles"
+    model="com.axelor.employee.db.EmployeeRole">
+
+    <view type="grid" name="employee-role-grid"/>
+    <view type="form" name="employee-role-form"/>
+
+  </action-view>
+
+</object-views>

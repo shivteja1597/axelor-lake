@@ -1,0 +1,138 @@
+services:
+  axelor-postgres:
+    image: postgres:14
+    container_name: axelor-postgres
+    environment:
+      POSTGRES_DB: axelor
+      POSTGRES_USER: axelor
+      POSTGRES_PASSWORD: axelor
+    ports:
+      - "5432:5432"
+    volumes:
+      - axelor-postgres-data:/var/lib/postgresql/data
+    networks:
+      - lakehouse
+
+  jenkins:
+    build:
+      context: ./jenkins
+    container_name: jenkins
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - C:/jenkins_home:/var/jenkins_home
+      - C:/Projects/open-suite-webapp-master:/var/jenkins_home/project
+      - //var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - lakehouse
+
+  pgduckdb:
+    image: pgduckdb/pgduckdb:17-v1.1.1
+    container_name: pgduckdb
+    environment:
+      POSTGRES_DB: analytics
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: duckdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgduckdb-data:/var/lib/postgresql/data
+    networks:
+      - lakehouse
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+      MINIO_DOMAIN: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      lakehouse:
+        aliases:
+          - warehouse.minio
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 admin password123; do sleep 2; done;
+      /usr/bin/mc mb -p local/lake-raw || true;
+      /usr/bin/mc mb -p local/lake-staging || true;
+      /usr/bin/mc mb -p local/lake-curated || true;
+      /usr/bin/mc mb -p local/lake-analytics || true;
+      /usr/bin/mc mb -p local/lake-models || true;
+      exit 0;
+      "
+    networks:
+      - lakehouse
+
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.105.0
+    container_name: nessie
+    environment:
+      NESSIE_CATALOG_DEFAULT_WAREHOUSE: warehouse
+      NESSIE_CATALOG_WAREHOUSES_WAREHOUSE_LOCATION: s3://lake-staging
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_REGION: us-east-1
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_ENDPOINT: http://minio:9000
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_PATH_STYLE_ACCESS: "true"
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_AUTH_TYPE: STATIC
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_ACCESS_KEY: urn:nessie-secret:quarkus:mys3default
+      MYS3DEFAULT_NAME: admin
+      MYS3DEFAULT_SECRET: password123
+    ports:
+      - "19120:19120"
+    depends_on:
+      - minio
+      - minio-init
+    networks:
+      - lakehouse
+
+  lakehouse-api:
+    build:
+      context: ./lakehouse-api
+    container_name: lakehouse-api
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: password123
+      MINIO_BUCKET: lake-staging
+      MINIO_ANALYTICS_BUCKET: lake-analytics
+      MINIO_MODELS_BUCKET: lake-models
+      ICEBERG_NAMESPACE: my_data
+      CATALOG_URI: http://nessie:19120/iceberg/main
+      PGDUCKDB_DSN: host=pgduckdb port=5432 dbname=analytics user=postgres password=duckdb
+      JENKINS_URL: http://jenkins:8080
+      JENKINS_JOB_URL: http://jenkins:8080/job/open-suite-lake-pipeline
+      JENKINS_USER: "admin"
+      JENKINS_API_TOKEN: "11e64f72fa7b664e82c265937d2c68b9c7"
+      JENKINS_BUILD_TOKEN: ""
+      JENKINS_WAIT_TIMEOUT_SECONDS: "600"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - pgduckdb
+      - minio
+      - minio-init
+      - nessie
+    networks:
+      - lakehouse
+
+networks:
+  lakehouse:
+    driver: bridge
+
+volumes:
+  axelor-postgres-data:
+  pgduckdb-data:
+  minio-data:

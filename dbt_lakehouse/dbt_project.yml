@@ -1,0 +1,24 @@
+name: 'lake_analytics'
+version: '1.0.0'
+config-version: 2
+
+profile: 'lake_analytics'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  lake_analytics:
+    staging:
+      +materialized: view
+    curated:
+      +materialized: table
+    analytics:
+      +materialized: table

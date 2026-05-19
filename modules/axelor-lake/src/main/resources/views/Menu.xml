@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+  <menuitem name="lake-menu-root" title="Lake"/>
+
+  <menuitem name="lake-menu-upload" parent="lake-menu-root" title="Upload CSV"
+    action="lake.lakehouse.upload.form"/>
+
+  <menuitem name="lake-menu-upload-customer" parent="lake-menu-root"
+    title="Upload Customer Data" action="lake.lakehouse.customer.upload.form"/>
+
+  <menuitem name="lake-menu-profiling" parent="lake-menu-root" title="Data Profiling"
+    action="lake.data.profiling.view"/>
+
+  <menuitem name="lake-menu-customer-predictions" parent="lake-menu-root"
+    title="Customer Predictions" action="lake.customer.predictions.view"/>
+
+  <menuitem name="lake-menu-lakehouse-table" parent="lake-menu-root"
+    title="Lakehouse Tables" action="lake.lakehouse.table.all"/>
+
+  <action-view name="lake.lakehouse.upload.form" title="Upload CSV to Lakehouse"
+    model="com.axelor.lake.db.LakehouseUpload">
+    <view type="form" name="lakehouse-upload-form"/>
+  </action-view>
+
+  <action-view name="lake.lakehouse.customer.upload.form" title="Upload Customer Data"
+    model="com.axelor.lake.db.LakehouseUpload">
+    <view type="form" name="lakehouse-customer-upload-form"/>
+  </action-view>
+
+  <action-view name="lake.lakehouse.table.all" title="Lakehouse Tables"
+    model="com.axelor.lake.db.LakehouseTable">
+    <view type="grid" name="lakehouse-table-grid"/>
+    <view type="form" name="lakehouse-table-form"/>
+  </action-view>
+
+</object-views>

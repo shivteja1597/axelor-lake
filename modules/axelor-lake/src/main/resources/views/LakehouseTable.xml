@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+  <grid name="lakehouse-table-grid" title="Lakehouse Tables"
+    model="com.axelor.lake.db.LakehouseTable" orderBy="-uploadedAt">
+    <field name="tableName"/>
+    <field name="syncStatus"/>
+    <field name="lastSyncAt"/>
+    <field name="uploadedAt"/>
+    <field name="uploadedRowCount" title="Uploaded rows"/>
+    <field name="rowCount" title="Current table rows"/>
+  </grid>
+
+  <form name="lakehouse-table-form" title="Lakehouse Table"
+    model="com.axelor.lake.db.LakehouseTable" onLoad="action-lakehouse-table-load-preview">
+    <panel title="Table Details">
+      <field name="tableName" required="true"/>
+      <field name="metadataPath" readonly="true"/>
+      <field name="uploadedAt" readonly="true"/>
+      <field name="uploadedRowCount" title="Uploaded rows" readonly="true"/>
+      <field name="rowCount" title="Current table rows" readonly="true"/>
+      <field name="syncStatus" readonly="true"/>
+      <field name="lastSyncAt" readonly="true"/>
+      <field name="syncMessage" readonly="true" colSpan="12"/>
+      <button name="openDataProfilingBtn" title="Open Data Profiling"
+        onClick="action-lakehouse-table-open-data-profiling"/>
+    </panel>
+    <panel sidebar="true" title="Actions">
+      <button name="deleteLakehouseTableBtn" title="Delete From Lakehouse" icon="trash"
+        onClick="action-lakehouse-table-validate-delete,action-lakehouse-table-delete,close"/>
+    </panel>
+    <panel title="Preview (first 100 rows)">
+      <button name="loadPreviewBtn" title="Refresh Preview"
+        onClick="action-lakehouse-table-load-preview"/>
+      <field name="queryPreview" readonly="true" colSpan="12" showTitle="false"/>
+    </panel>
+  </form>
+
+  <action-validate name="action-lakehouse-table-validate-delete">
+    <alert
+      message="This will delete the selected table from Axelor, Nessie, and MinIO. Continue?"/>
+  </action-validate>
+
+  <action-method name="action-lakehouse-table-load-preview">
+    <call class="com.axelor.lake.web.LakehouseController" method="loadPreview"/>
+  </action-method>
+
+  <action-method name="action-lakehouse-table-open-data-profiling">
+    <call class="com.axelor.lake.web.LakehouseController" method="openDataProfiling"/>
+  </action-method>
+
+  <action-method name="action-lakehouse-table-delete">
+    <call class="com.axelor.lake.web.LakehouseController" method="deleteLakehouseTable"/>
+  </action-method>
+
+</object-views>
+

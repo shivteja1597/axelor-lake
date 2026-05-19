@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<domain-models xmlns="http://axelor.com/xml/ns/domain-models"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/domain-models
+  https://axelor.com/xml/ns/domain-models/domain-models_8.1.xsd">
+
+  <module name="employee" package="com.axelor.employee.db"/>
+
+  <entity name="Employee">
+
+    <string name="employeeId" readonly="true"/>
+    <string name="firstName"/>
+    <string name="lastName"/>
+    <string name="email" readonly="true"/>
+
+    <integer name="age" required="true" min="18" max="65"/>
+    <decimal name="salary" required="true" min="10000"/>
+    <date name="joiningDate" required="true"/>
+
+    <many-to-one name="department" ref="EmployeeDepartment" required="true"/>
+    <many-to-one name="role" ref="EmployeeRole" required="true"/>
+
+  </entity>
+
+</domain-models>

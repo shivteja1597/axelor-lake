@@ -1,0 +1,169 @@
+import com.axelor.gradle.tasks.CheckCredentialsInRptdesign
+import com.axelor.gradle.tasks.CheckXmlDomainsAttributes
+import com.axelor.gradle.tasks.CheckXmlImportsAttributes
+import com.axelor.gradle.tasks.CheckXmlViewsAttributes
+import com.axelor.gradle.tasks.GenerateAosChangelog
+import com.axelor.gradle.tasks.CheckEOLCharsInCsv
+import com.axelor.gradle.tasks.CheckJavaInjectAnnotationImport
+
+plugins {
+  id 'com.axelor.app'
+}
+
+axelor {
+  title = "Axelor ERP"
+  description = "Axelor Entreprise Application"
+}
+
+allprojects {
+  apply plugin: 'idea'
+  apply plugin: 'eclipse'
+
+  group = 'com.axelor.apps'
+  version = '9.0.3'
+
+  java {
+    toolchain {
+      languageVersion = JavaLanguageVersion.of(21)
+    }
+  }
+
+  afterEvaluate {
+    test {
+      useJUnitPlatform()
+      beforeTest { descriptor ->
+        logger.lifecycle('Running: ' + descriptor)
+      }
+    }
+  }
+
+  configurations {
+    runtimeClasspath.exclude group: "org.eclipse.birt.runtime.3_7_1", module: "org.apache.commons.codec"
+    runtimeClasspath.exclude group: "org.eclipse.birt.runtime.3_7_1", module: "com.lowagie.text"
+
+  }
+  configurations.all {
+    exclude group: 'org.glassfish.jaxb', module: 'jaxb-runtime'
+  }
+}
+
+tasks.withType(PublishToMavenRepository).configureEach { it.enabled = false }
+
+dependencies {
+  gradle.appModules.each { dir ->
+    implementation project(":modules:$dir.name")
+  }
+}
+
+tasks.named('run', JavaExec) {
+  dependsOn tasks.named('installDist')
+  group = 'application'
+  description = 'Run Axelor in the foreground with Gradle-managed process lifecycle.'
+  classpath = fileTree("${buildDir}/install/${rootProject.name}/lib")
+  mainClass = 'com.axelor.app.Launcher'
+  workingDir = projectDir
+  standardInput = System.in
+}
+
+apply from: 'gradle/style.gradle'
+
+task archiveReports(type: Zip) {
+  file("modules").traverse(type: groovy.io.FileType.DIRECTORIES, maxDepth: 1) { dir ->
+    if (new File(dir, "build.gradle").exists() && new File(dir, "/src/main/resources/reports").exists()) {
+      new File(dir, "/src/main/resources/reports/").listFiles().each { report ->
+        from report.getPath()
+      }
+    }
+  }
+
+  archiveClassifier = 'reports'
+  includeEmptyDirs = false
+  destinationDirectory = file("$buildDir/libs")
+}
+
+
+task generateChangelog(type: GenerateAosChangelog) {
+  group "Axelor application"
+  description "Generate change logs from unreleased entries."
+  files = fileTree(projectDir) {
+    include '**/changelogs/**/*.yml'
+    include '**/changelogs/**/*.yaml'
+  }
+}
+
+task checkCsvEOL(type: CheckEOLCharsInCsv) {
+  group "Axelor application"
+  description "Check end-of-line characters in CSV files."
+  files = fileTree(projectDir) {
+    exclude '**/build'
+    exclude '**/bin'
+    exclude '**/out'
+    include '**/*.csv'
+  }
+}
+
+task checkBirtCredentials(type: CheckCredentialsInRptdesign) {
+  group "Axelor application"
+  description "Check if .rptdesign files (BIRT) contain credentials."
+  files = fileTree(projectDir) {
+    exclude '**/build'
+    exclude '**/bin'
+    exclude '**/out'
+    include '**/*.rptdesign'
+  }
+}
+
+task checkXmlDomainsAttributes(type: CheckXmlDomainsAttributes) {
+  group "Axelor application"
+  description "Verify errors in XML domain files."
+  files = fileTree(projectDir) {
+    exclude '**/build'
+    exclude '**/bin'
+    exclude '**/out'
+    include '**/modules/**/src/main/resources/domains/*.xml'
+  }
+}
+
+task checkXmlViewsAttributes(type: CheckXmlViewsAttributes) {
+  group "Axelor application"
+  description "Verify errors in XML view files."
+  files = fileTree(projectDir) {
+    exclude '**/build'
+    exclude '**/bin'
+    exclude '**/out'
+    include '**/modules/**/src/main/resources/views/*.xml'
+  }
+}
+
+task checkXmlImportsAttributes(type: CheckXmlImportsAttributes) {
+  group "Axelor application"
+  description "Verify errors in XML import files."
+  files = fileTree(projectDir) {
+    exclude '**/build'
+    exclude '**/bin'
+    exclude '**/out'
+    include "**/modules/**/src/main/resources/apps/**/*.xml"
+    include "**/modules/**/src/main/resources/data-import/*.xml"
+    include "**/modules/**/src/main/resources/data-init/*.xml"
+    include '**/modules/**/src/main/resources/import-configs/*.xml'
+  }
+}
+
+task checkJavaInjectAnnotationImport(type: CheckJavaInjectAnnotationImport) {
+  group "Axelor application"
+  description "Verify Inject annotation import in Java files."
+  files = fileTree(projectDir) {
+    exclude '**/build'
+    exclude '**/bin'
+    exclude '**/out'
+    include "**/modules/**/src/main/java/**/*.java"
+  }
+}
+
+task checkXml(dependsOn: ['checkXmlDomainsAttributes','checkXmlViewsAttributes', 'checkXmlImportsAttributes'])
+
+build.finalizedBy archiveReports
+
+dependencies {
+    implementation project(':modules:axelor-employee')
+}

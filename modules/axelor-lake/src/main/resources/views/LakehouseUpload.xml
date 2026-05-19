@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+  <form name="lakehouse-upload-form" title="Upload CSV to Lakehouse"
+    model="com.axelor.lake.db.LakehouseUpload" width="large">
+    <panel title="Upload Details">
+      <field name="tableName" required="true"/>
+      <field name="csvFile" widget="binary-link" required="true" canNew="true"
+        form-view="meta-files-form" grid-view="meta-files-grid" x-accept=".csv,text/csv"/>
+    </panel>
+    <panel sidebar="true">
+      <button name="uploadBtn" title="Upload" onClick="save,action-lakehouse-upload-submit"
+        readonlyIf="csvFile == null || !tableName"/>
+    </panel>
+  </form>
+
+  <form name="lakehouse-customer-upload-form" title="Upload Customer Data"
+    model="com.axelor.lake.db.LakehouseUpload" width="large"
+    onNew="action-record-lakehouse-customer-upload-defaults">
+    <panel title="Customer Upload Details">
+      <field name="tableName" title="Dataset name" readonly="true"/>
+      <field name="csvFile" widget="binary-link" required="true" canNew="true"
+        form-view="meta-files-form" grid-view="meta-files-grid" x-accept=".csv,text/csv"/>
+    </panel>
+    <panel sidebar="true">
+      <button name="uploadCustomerBtn" title="Process Customer CSV"
+        onClick="save,action-lakehouse-customer-upload-submit" readonlyIf="csvFile == null"/>
+    </panel>
+  </form>
+
+  <action-record name="action-record-lakehouse-customer-upload-defaults"
+    model="com.axelor.lake.db.LakehouseUpload">
+    <field name="tableName" expr="eval: 'customer_profile'"/>
+  </action-record>
+
+  <action-method name="action-lakehouse-upload-submit">
+    <call class="com.axelor.lake.web.LakehouseController" method="uploadCsv"/>
+  </action-method>
+
+  <action-method name="action-lakehouse-customer-upload-submit">
+    <call class="com.axelor.lake.web.LakehouseController" method="uploadCustomerCsv"/>
+  </action-method>
+
+</object-views>

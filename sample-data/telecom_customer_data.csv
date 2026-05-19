@@ -1,0 +1,31 @@
+customer_id,name,age,gender,tenure,contract,monthly_charges,total_charges,internet_service,payment_method,churn
+C001,Aarav Mehta,24,Male,1,Month-to-month,89.50,89.50,Fiber optic,Electronic check,Yes
+C002,Sneha Reddy,29,Female,3,Month-to-month,78.20,234.60,DSL,Mailed check,Yes
+C003,Vikram Singh,34,Male,5,Month-to-month,92.10,460.50,Fiber optic,Electronic check,Yes
+C004,Isha Patel,31,Female,8,Month-to-month,74.30,594.40,DSL,Bank transfer,Yes
+C005,Rohan Kumar,27,Male,2,Month-to-month,95.40,190.80,Fiber optic,Credit card,Yes
+C006,Ananya Das,38,Female,4,Month-to-month,81.75,327.00,Fiber optic,Electronic check,Yes
+C007,Aditya Rao,41,Male,6,Month-to-month,88.90,533.40,Fiber optic,Electronic check,Yes
+C008,Meera Nair,36,Female,7,Month-to-month,69.40,485.80,DSL,Mailed check,Yes
+C009,Neha Kapoor,45,Female,12,One year,56.20,674.40,DSL,Bank transfer,No
+C010,Harsh Verma,48,Male,15,One year,61.80,927.00,DSL,Credit card,No
+C011,Priya Iyer,52,Female,18,One year,58.35,1050.30,No,Bank transfer,No
+C012,Karan Malhotra,43,Male,20,One year,63.10,1262.00,DSL,Credit card,No
+C013,Divya Sharma,56,Female,24,Two year,45.90,1101.60,No,Bank transfer,No
+C014,Rahul Jain,60,Male,28,Two year,49.75,1393.00,DSL,Credit card,No
+C015,Pooja Menon,58,Female,30,Two year,52.40,1572.00,Fiber optic,Bank transfer,No
+C016,Arjun Babu,62,Male,36,Two year,47.25,1701.00,No,Credit card,No
+C017,Nikita Roy,33,Female,10,Month-to-month,72.60,726.00,DSL,Electronic check,Yes
+C018,Sandeep Gill,47,Male,14,One year,59.95,839.30,DSL,Bank transfer,No
+C019,Kavya Joshi,54,Female,22,Two year,50.10,1102.20,No,Credit card,No
+C020,Manish Yadav,30,Male,9,Month-to-month,76.85,691.65,Fiber optic,Electronic check,Yes
+C021,Asha Kulkarni,39,Female,11,One year,67.50,742.50,DSL,Bank transfer,Yes
+C022,Raj Shetty,42,Male,13,One year,64.20,834.60,DSL,Credit card,No
+C023,Tara Chandra,37,Female,9,Month-to-month,61.00,549.00,DSL,Mailed check,No
+C024,Kiran Dev,40,Male,12,One year,70.10,841.20,Fiber optic,Electronic check,Yes
+C025,Nisha Paul,44,Female,16,One year,66.80,1068.80,DSL,Bank transfer,No
+C026,Varun Saxena,35,Male,11,Month-to-month,68.40,752.40,Fiber optic,Credit card,Yes
+C027,Ritu Anand,46,Female,17,One year,62.30,1059.10,DSL,Mailed check,No
+C028,Samir Khan,38,Male,14,One year,69.20,968.80,Fiber optic,Bank transfer,Yes
+C029,Pallavi Sen,41,Female,12,One year,65.40,784.80,DSL,Electronic check,No
+C030,Naveen Rao,43,Male,15,One year,67.90,1018.50,Fiber optic,Credit card,Yes

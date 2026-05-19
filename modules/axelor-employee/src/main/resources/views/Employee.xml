@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+  <!-- Employee View -->
+
+  <grid name="employee-employee-grid" title="Employees" model="com.axelor.employee.db.Employee">
+
+    <field name="employeeId"/>
+    <field name="firstName"/>
+    <field name="lastName"/>
+    <field name="email"/>
+    <field name="department"/>
+    <field name="role"/>
+    <field name="age"/>
+    <field name="salary"/>
+    <field name="joiningDate"/>
+
+  </grid>
+
+  <form name="employee-employee-form" title="Employee" model="com.axelor.employee.db.Employee"
+    onSave="com.axelor.employee.web.EmployeeController:generateEmail">
+
+    <panel title="Basic Information">
+
+      <field name="employeeId" readonly="true"/>
+      <field name="firstName" required="true"/>
+      <field name="lastName" required="true"/>
+
+      <!-- Email will be generated automatically -->
+      <field name="email" readonly="true"/>
+
+      <field name="department" required="true"/>
+      <field name="role" required="true"/>
+      <field name="age" required="true" min="18" max="65"/>
+      <field name="salary" required="true" min="10000"/>
+      <field name="joiningDate" required="true"/>
+
+    </panel>
+
+  </form>
+
+  <!-- Employee Department View -->
+
+  <grid name="employee-department-grid" title="Departments"
+    model="com.axelor.employee.db.EmployeeDepartment">
+
+    <field name="code"/>
+    <field name="name"/>
+
+  </grid>
+
+  <form name="employee-department-form" title="Department"
+    model="com.axelor.employee.db.EmployeeDepartment">
+
+    <panel title="Department Info">
+      <field name="code"/>
+      <field name="name"/>
+    </panel>
+
+  </form>
+
+  <grid name="employee-role-grid" title="Roles" model="com.axelor.employee.db.EmployeeRole">
+
+    <field name="role"/>
+
+  </grid>
+
+  <form name="employee-role-form" title="Role" model="com.axelor.employee.db.EmployeeRole">
+
+    <panel title="Role Info">
+
+      <field name="role"/>
+
+    </panel>
+
+  </form>
+
+</object-views>

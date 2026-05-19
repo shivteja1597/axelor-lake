@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+  <custom name="custom.lake.column.profile" title="Column Profiles" css="report-box">
+    <dataset type="rpc"><![CDATA[
+      com.axelor.lake.web.LakehouseController:loadColumnProfiles
+    ]]></dataset>
+    <template><![CDATA[
+      <report-table data='data' columns='column_name,data_type,null_count,null_percentage,distinct_count,sample_values,quality_note'></report-table>
+    ]]></template>
+  </custom>
+
+  <custom name="custom.lake.filtered.employee.table" title="Employee Analysis"
+    css="report-box">
+    <dataset type="rpc"><![CDATA[
+      com.axelor.lake.web.LakehouseController:loadFilteredEmployees
+    ]]></dataset>
+    <template><![CDATA[
+      <div class='report-data' style='width:100%; overflow-x:auto; padding:10px;'>
+        <div ng-if='first' style='padding: 0 0 12px; color: #555; font-size: 13px; display:flex; justify-content:flex-end;'>
+          Showing page {{ first._page }} of {{ first._totalPages }} ({{ first._totalRows }} rows)
+        </div>
+        <div ng-if='!first' style='padding: 12px 0; color: #777;'>No employee analysis rows found.</div>
+        <div ng-if='first && first._reportName == "dim_employee"' style='min-width:100%;'>
+          <report-table data='data' columns='employeeId,name,department,role,age,salary,status'></report-table>
+        </div>
+        <div ng-if='first && first._reportName == "employee_role_summary"' style='min-width:100%;'>
+          <report-table data='data' columns='role,employee_count,average_salary'></report-table>
+        </div>
+        <div ng-if='first && first._reportName == "employee_manager_summary"' style='min-width:100%;'>
+          <report-table data='data' columns='department,role,manager_name,dept_manager_count'></report-table>
+        </div>
+        <div ng-if='first && first._reportName == "employee_department_salary_summary"' style='min-width:100%;'>
+          <report-table data='data' columns='department,salary_band,employee_count,total_salary'></report-table>
+        </div>
+        <div ng-if='first && first._reportName == "customer_predictions"' style='min-width:100%;'>
+          <report-table data='data' columns='account_id,site_id,customer_name,state,contract_status,plan_type,current_rmr,churn_risk_percentage,risk_segment'></report-table>
+        </div>
+      </div>
+    ]]></template>
+  </custom>
+
+  <custom name="custom.lake.customer.predictions.table" title="Customer Predictions"
+    css="report-box">
+    <field name="account_id" title="Account id" type="string"/>
+    <field name="site_id" title="Site id" type="string"/>
+    <field name="customer_name" title="Customer name" type="string"/>
+    <field name="state" title="State" type="string"/>
+    <field name="contract_status" title="Contract status" type="string"/>
+    <field name="plan_type" title="Plan type" type="string"/>
+    <field name="current_rmr" title="Current rmr" type="decimal"/>
+    <field name="churn_risk_percentage" title="Churn risk percentage" type="decimal"/>
+    <field name="risk_segment" title="Risk segment" type="string"/>
+    <field name="_page" type="integer"/>
+    <field name="_totalRows" type="integer"/>
+    <field name="_totalPages" type="integer"/>
+    <field name="_reportName" type="string"/>
+    <dataset type="rpc"><![CDATA[
+      com.axelor.lake.web.LakehouseController:loadCustomerPredictions
+    ]]></dataset>
+    <template><![CDATA[
+      <div class='report-data' style='width:100%; overflow-x:auto; padding:10px;'>
+        <div ng-if='first' style='padding: 0 0 12px; color: #555; font-size: 13px; display:flex; justify-content:flex-end;'>
+          Showing page {{ first._page }} of {{ first._totalPages }} ({{ first._totalRows }} rows)
+        </div>
+        <div ng-if='!first' style='padding: 12px 0; color: #777;'>No customer prediction rows found yet.</div>
+        <div ng-if='first' style='min-width:100%;'>
+          <report-table data='data' columns='account_id,site_id,customer_name,state,contract_status,plan_type,current_rmr,churn_risk_percentage,risk_segment'></report-table>
+        </div>
+      </div>
+    ]]></template>
+  </custom>
+
+  <custom name="custom.lake.customer.predictions.summary" title="Customer Prediction Summary"
+    css="report-box">
+    <field name="total_customers" title="Total customers" type="integer"/>
+    <field name="active_customers" title="Active customers" type="integer"/>
+    <field name="high_risk_customers" title="High risk customers" type="integer"/>
+    <field name="medium_risk_customers" title="Medium risk customers" type="integer"/>
+    <field name="low_risk_customers" title="Low risk customers" type="integer"/>
+    <field name="predicted_churn_percentage" title="Predicted churn percentage" type="decimal"/>
+    <field name="high_risk_churn_percentage" title="High risk churn percentage" type="decimal"/>
+    <field name="medium_risk_churn_percentage" title="Medium risk churn percentage"
+      type="decimal"/>
+    <field name="low_risk_churn_percentage" title="Low risk churn percentage" type="decimal"/>
+    <dataset type="rpc"><![CDATA[
+      com.axelor.lake.web.LakehouseController:loadCustomerPredictionSummary
+    ]]></dataset>
+    <template><![CDATA[
+      <div class='report-data' style='width:100%; padding:10px 12px 18px;'>
+        <div ng-if='!first' style='padding: 12px 0; color: #777;'>No customer prediction summary available yet.</div>
+        <div ng-if='first'
+          style='display:grid; grid-template-columns:repeat(4, minmax(200px, 1fr)); gap:14px; align-content:start;'>
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'># Active Customers</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px;'>{{ first.active_customers | number:0 }}</div>
+          </div>
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'># High Risk Customers</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px; background:#ff6957; color:#111; border-radius:6px;'>{{ first.high_risk_customers | number:0 }}</div>
+          </div>
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'># Medium Risk Customers</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px; background:#ffc76b; color:#111; border-radius:6px;'>{{ first.medium_risk_customers | number:0 }}</div>
+          </div>
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'># Low Risk Customers</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px; background:#8ab374; color:#111; border-radius:6px;'>{{ first.low_risk_customers | number:0 }}</div>
+          </div>
+
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'>Predicted Churn %</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px;'>{{ first.predicted_churn_percentage | number:1 }}%</div>
+          </div>
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'>Predicted Churn % - High Risk</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px; background:#ff6957; color:#111; border-radius:6px;'>{{ first.high_risk_churn_percentage | number:1 }}%</div>
+          </div>
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'>Predicted Churn % - Medium Risk</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px; background:#ffc76b; color:#111; border-radius:6px;'>{{ first.medium_risk_churn_percentage | number:1 }}%</div>
+          </div>
+          <div style='border:1px solid #d9e6f2; border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(15, 35, 95, 0.08); padding:14px; min-height:126px;'>
+            <div style='font-weight:600; color:#37406b; font-size:14px;'>Predicted Churn % - Low Risk</div>
+            <div style='font-size:24px; font-weight:700; text-align:center; padding:20px 0 6px; background:#8ab374; color:#111; border-radius:6px;'>{{ first.low_risk_churn_percentage | number:1 }}%</div>
+          </div>
+        </div>
+      </div>
+    ]]></template>
+  </custom>
+
+  <custom name="custom.lake.customer.segment.risk.matrix" title="Customer Groups by Risk"
+    css="report-box">
+    <field name="customer_segment_bucket" title="Customer group" type="string"/>
+    <field name="high_risk_count" title="High Risk" type="integer"/>
+    <field name="medium_risk_count" title="Medium Risk" type="integer"/>
+    <field name="low_risk_count" title="Low Risk" type="integer"/>
+    <dataset type="rpc"><![CDATA[
+      com.axelor.lake.web.LakehouseController:loadCustomerSegmentRiskMatrix
+    ]]></dataset>
+    <template><![CDATA[
+      <div class='report-data' style='width:100%; padding:10px 12px 18px; overflow-x:auto;'>
+        <div ng-if='!first' style='padding: 12px 0; color: #777;'>No customer group summary available yet.</div>
+        <div ng-if='first' style='min-width:100%;'>
+          <report-table data='data' columns='customer_segment_bucket,high_risk_count,medium_risk_count,low_risk_count'></report-table>
+        </div>
+      </div>
+    ]]></template>
+  </custom>
+
+</object-views>
+
+

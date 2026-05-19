@@ -1,0 +1,16 @@
+plugins {
+  id 'com.axelor.app'
+}
+
+dependencies {
+  api project(":modules:axelor-base")
+  implementation 'software.amazon.awssdk:s3:2.20.0'
+  implementation 'org.apache.parquet:parquet-avro:1.13.1'
+  implementation 'org.apache.iceberg:iceberg-core:1.4.0'
+  implementation 'org.apache.iceberg:iceberg-aws:1.4.0'
+  implementation 'org.duckdb:duckdb_jdbc:0.10.0'
+}
+
+axelor {
+  title = 'Axelor Employee'
+}

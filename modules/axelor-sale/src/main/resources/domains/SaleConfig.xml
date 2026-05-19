@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<domain-models xmlns="http://axelor.com/xml/ns/domain-models"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/domain-models http://axelor.com/xml/ns/domain-models/domain-models_8.0.xsd">
+
+  <module name="sale" package="com.axelor.apps.sale.db"/>
+
+  <entity name="SaleConfig" cacheable="true">
+    <one-to-one name="company" ref="com.axelor.apps.base.db.Company" title="Company"
+      required="true" unique="true"/>
+
+    <decimal name="acceptedCredit" title="Accepted Credit"/>
+    <integer name="saleOrderInAtiSelect" title="Sale orders ATI/WT"
+      selection="base.in.ati.select" default="1"/>
+    <string name="saleOrderClientBox" large="true" multiline="true"
+      title="Client box in sale order" translatable="true"/>
+    <string name="saleOrderLegalNote" large="true" multiline="true"
+      title="Legal note on sale order" help="Short legal note to be displayed on sales order"
+      translatable="true"/>
+    <boolean name="displaySalemanOnPrinting" title="Display saleman on printing"/>
+    <boolean name="displayDelCondOnPrinting" title="Display delivery condition on printing"/>
+    <boolean name="displayProductCodeOnPrinting" title="Display product code on printing"/>
+    <boolean name="displayTaxDetailOnPrinting" title="Display tax detail on printing"/>
+    <boolean name="displayEstimShipDateOnPrinting"
+      title="Display estimated shipping dates on printing"/>
+    <boolean name="displayCustomerCodeOnPrinting" title="Display customer code on printing"/>
+    <boolean name="displayProductPictureOnPrinting"
+      title="Display product picture on printing"/>
+    <many-to-one name="defaultValidityDuration" ref="com.axelor.apps.base.db.Duration"
+      title="Validity duration per default"/>
+    <boolean name="isAnalyticDistributionRequired"
+      title="Analytic distribution required on sale order line"/>
+    <decimal name="defaultHoldBackPercentage" title="Default holdback percentage"/>
+    <many-to-one name="saleOrderPrintTemplate" title="Sale order template"
+      ref="com.axelor.apps.base.db.PrintingTemplate"/>
+    <integer name="cartOrderCreationModeSelect"
+      title="Order creation for cart when stock is missing"
+      selection="cart.order.creation.mode.select" default="0"
+      help="This configuration blocks the creation of orders, or ignores missing products, if there are products missing from the cart."/>
+
+    <extra-code>
+      <![CDATA[
+        // TYPE SELECT
+		public static final int SALE_WT_ALWAYS = 1;
+		public static final int SALE_ATI_ALWAYS = 2;
+		public static final int SALE_WT_DEFAULT = 3;
+		public static final int SALE_ATI_DEFAULT = 4;
+
+		// ORDER CREATION MODE SELECT
+		public static final int CREATE_ORDER_WITH_MISSING_PRODUCTS = 0;
+		public static final int IGNORE_MISSING_PRODUCTS = 1;
+		public static final int BLOCK_ORDER_CREATION = 2;
+      ]]>
+    </extra-code>
+
+    <track>
+      <field name="company" on="UPDATE"/>
+      <field name="saleOrderInAtiSelect" on="UPDATE"/>
+      <field name="defaultValidityDuration" on="UPDATE"/>
+      <field name="acceptedCredit" on="UPDATE"/>
+      <field name="displaySalemanOnPrinting" on="UPDATE"/>
+      <field name="displayDelCondOnPrinting" on="UPDATE"/>
+      <field name="displayProductCodeOnPrinting" on="UPDATE"/>
+      <field name="displayTaxDetailOnPrinting" on="UPDATE"/>
+      <field name="displayEstimShipDateOnPrinting" on="UPDATE"/>
+      <field name="displayCustomerCodeOnPrinting" on="UPDATE"/>
+      <field name="displayProductPictureOnPrinting" on="UPDATE"/>
+      <field name="saleOrderClientBox" on="UPDATE"/>
+      <field name="saleOrderLegalNote" on="UPDATE"/>
+      <field name="isAnalyticDistributionRequired" on="UPDATE"/>
+      <field name="saleOrderPrintTemplate" on="UPDATE"/>
+      <field name="defaultHoldBackPercentage" on="UPDATE"/>
+      <field name="cartOrderCreationModeSelect" on="UPDATE"/>
+    </track>
+  </entity>
+
+</domain-models>
