@@ -517,8 +517,10 @@ public class LakehouseServiceImpl implements LakehouseService {
             getOptionalDecimalValue(resultSet, columnIndexes, "churn_risk_percentage"));
         prediction.setRiskSegment(getOptionalRowValue(resultSet, columnIndexes, "risk_segment"));
         prediction.setBaseRisk(getOptionalDecimalValue(resultSet, columnIndexes, "base_risk"));
-        prediction.setPositiveRiskDrivers(getOptionalRowValue(resultSet, columnIndexes, "positive_risk_drivers"));
-        prediction.setNegativeRiskDrivers(getOptionalRowValue(resultSet, columnIndexes, "negative_risk_drivers"));
+        prediction.setPositiveRiskDrivers(
+            getOptionalRowValue(resultSet, columnIndexes, "positive_risk_drivers"));
+        prediction.setNegativeRiskDrivers(
+            getOptionalRowValue(resultSet, columnIndexes, "negative_risk_drivers"));
         predictions.add(prediction);
 
         if (scannedRowCount % PREDICTION_SYNC_BATCH_SIZE == 0) {

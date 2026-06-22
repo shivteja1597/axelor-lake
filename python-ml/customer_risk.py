@@ -270,8 +270,8 @@ def build_predictions_frame(
         positives = [f"{feat} (+{val:.2f}%)" for feat, val in sorted_impacts if val > 0]
         negatives = [f"{feat} ({val:.2f}%)" for feat, val in sorted_impacts[::-1] if val < 0]
         
-        positive_drivers_list.append("\\n".join(positives) if positives else "None")
-        negative_drivers_list.append("\\n".join(negatives) if negatives else "None")
+        positive_drivers_list.append("\n".join(positives) if positives else "None")
+        negative_drivers_list.append("\n".join(negatives) if negatives else "None")
         base_risk_list.append(round(base_value, 2))
         
     predictions["base_risk"] = base_risk_list
