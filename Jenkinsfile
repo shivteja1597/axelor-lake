@@ -89,7 +89,7 @@ pipeline {
             python3 -m venv dbt_venv
             . dbt_venv/bin/activate
             pip install --no-cache-dir --upgrade pip setuptools wheel
-            pip install --no-cache-dir dbt-duckdb==1.10.1 duckdb==1.5.3 pandas scikit-learn joblib boto3
+            pip install --no-cache-dir dbt-duckdb==1.10.1 duckdb==1.5.3 pandas scikit-learn joblib boto3 shap
             export CUSTOMER_PROFILE_DATA_GLOB="s3://lake-raw/${LAKE_TABLE_NAME}/*.csv"
             cd dbt_lakehouse
             dbt deps

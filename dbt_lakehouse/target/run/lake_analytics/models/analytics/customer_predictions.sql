@@ -14,7 +14,10 @@ select
     try_cast(current_rmr as double) as current_rmr,
     trim(cast(customer_segment_bucket as varchar)) as customer_segment_bucket,
     try_cast(churn_risk_percentage as double) as churn_risk_percentage,
-    trim(cast(risk_segment as varchar)) as risk_segment
+    trim(cast(risk_segment as varchar)) as risk_segment,
+    try_cast(base_risk as double) as base_risk,
+    trim(cast(positive_risk_drivers as varchar)) as positive_risk_drivers,
+    trim(cast(negative_risk_drivers as varchar)) as negative_risk_drivers
 from prediction_file
 where account_id is not null
     );

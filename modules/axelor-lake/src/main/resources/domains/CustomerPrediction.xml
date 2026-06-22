@@ -17,6 +17,9 @@
     <string name="customerSegmentBucket"/>
     <decimal name="churnRiskPercentage" precision="20" scale="2"/>
     <string name="riskSegment"/>
+    <decimal name="baseRisk" precision="20" scale="2"/>
+    <string name="positiveRiskDrivers" large="true"/>
+    <string name="negativeRiskDrivers" large="true"/>
   </entity>
 
 </domain-models>

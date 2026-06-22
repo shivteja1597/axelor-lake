@@ -7,6 +7,8 @@ import boto3
 import duckdb
 import joblib
 import pandas as pd
+import shap
+import json
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -232,6 +234,50 @@ def build_predictions_frame(
     predictions["customer_segment_bucket"] = training_frame["customer_segment_bucket"].fillna(
         "Review Required"
     )
+
+    # Compute SHAP values
+    preprocessor = model.named_steps["preprocessor"]
+    classifier = model.named_steps["classifier"]
+    
+    # Transform data
+    X_transformed = preprocessor.transform(model_input)
+    
+    # Get feature names
+    categorical_encoder = preprocessor.named_transformers_["categorical"].named_steps["encoder"]
+    cat_features = categorical_encoder.get_feature_names_out(CATEGORICAL_FEATURES)
+    feature_names = list(NUMERIC_FEATURES) + list(cat_features)
+    
+    # Calculate SHAP
+    explainer = shap.LinearExplainer(classifier, X_transformed, feature_names=feature_names)
+    shap_values = explainer.shap_values(X_transformed)
+    base_value = explainer.expected_value
+    
+    positive_drivers_list = []
+    negative_drivers_list = []
+    base_risk_list = []
+    
+    for i in range(len(model_input)):
+        # SHAP values for sample i
+        sample_shap = shap_values[i]
+        
+        # Combine feature names and their SHAP values
+        feature_impacts = list(zip(feature_names, sample_shap))
+        
+        # Sort by impact
+        sorted_impacts = sorted(feature_impacts, key=lambda x: x[1], reverse=True)
+        
+        # Extract top 3 positive (risk increasing) and top 3 negative (risk decreasing)
+        positives = [f"{feat} (+{val:.2f})" for feat, val in sorted_impacts if val > 0][:3]
+        negatives = [f"{feat} ({val:.2f})" for feat, val in sorted_impacts[::-1] if val < 0][:3]
+        
+        positive_drivers_list.append("\\n".join(positives) if positives else "None")
+        negative_drivers_list.append("\\n".join(negatives) if negatives else "None")
+        base_risk_list.append(round(base_value, 2))
+        
+    predictions["base_risk"] = base_risk_list
+    predictions["positive_risk_drivers"] = positive_drivers_list
+    predictions["negative_risk_drivers"] = negative_drivers_list
+
     return assign_risk_segments(predictions)
 
 
@@ -250,6 +296,9 @@ def write_parquet_outputs(
             "customer_segment_bucket",
             "churn_risk_percentage",
             "risk_segment",
+            "base_risk",
+            "positive_risk_drivers",
+            "negative_risk_drivers",
         ]
     ].copy()
     connection.register("customer_predictions_df", prediction_export)

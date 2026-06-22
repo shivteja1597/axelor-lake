@@ -174,14 +174,7 @@
       title="Customer Segmentation" colSpan="12" height="320"
       action="dashlet.lake.customer.segment.risk.matrix"/>
     <panel-dashlet name="lakeCustomerPredictionPanel" title="Prediction Table"
-      colSpan="12" height="420" action="dashlet.lake.customer.predictions.table"/>
-    <panel name="customerPredictionPagingPanel" colSpan="12" itemSpan="4">
-      <button name="customerPredictionPrevPageBtn" title="Previous Page"
-        onClick="action-group-lake-customer-prev-page"/>
-      <field name="customerPageDisplay" title="Page" readonly="true"/>
-      <button name="customerPredictionNextPageBtn" title="Next Page"
-        onClick="action-group-lake-customer-next-page"/>
-    </panel>
+      colSpan="12" height="520" action="dashlet.lake.customer.predictions.grid"/>
   </form>
 
   <action-group name="action-group-lake-customer-on-new">
@@ -233,9 +226,10 @@
     <view type="form" name="lake-customer-predictions-form"/>
   </action-view>
 
-  <action-view name="dashlet.lake.customer.predictions.table"
-    title="Customer Predictions">
-    <view type="custom" name="custom.lake.customer.predictions.table"/>
+  <action-view name="dashlet.lake.customer.predictions.grid"
+    title="Customer Predictions" model="com.axelor.lake.db.LakeCustomerPrediction">
+    <view type="grid" name="lake-customer-prediction-grid"/>
+    <view type="form" name="lake-customer-prediction-form"/>
   </action-view>
 
   <action-view name="dashlet.lake.customer.predictions.summary"

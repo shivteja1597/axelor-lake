@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<object-views xmlns="http://axelor.com/xml/ns/object-views"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/object-views
+  https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
+
+  <grid name="lake-customer-prediction-grid" title="Customer Predictions"
+    model="com.axelor.lake.db.LakeCustomerPrediction">
+    <field name="accountId"/>
+    <field name="siteId"/>
+    <field name="customerName"/>
+    <field name="state"/>
+    <field name="contractStatus"/>
+    <field name="planType"/>
+    <field name="currentRmr"/>
+    <field name="churnRiskPercentage"/>
+    <field name="riskSegment"/>
+  </grid>
+
+  <form name="lake-customer-prediction-form" title="Customer Prediction Details"
+    model="com.axelor.lake.db.LakeCustomerPrediction" width="large">
+    <panel name="infoPanel" title="Customer Information">
+      <field name="accountId"/>
+      <field name="siteId"/>
+      <field name="customerName"/>
+      <field name="state"/>
+      <field name="contractStatus"/>
+      <field name="planType"/>
+      <field name="currentRmr"/>
+      <field name="customerSegmentBucket"/>
+    </panel>
+    <panel name="predictionPanel" title="Churn Prediction">
+      <field name="churnRiskPercentage" title="Churn Risk (%)"/>
+      <field name="riskSegment" title="Risk Segment"/>
+    </panel>
+    <panel name="shapPanel" title="Risk Drivers (SHAP Breakdown)">
+      <field name="baseRisk" title="Base Risk (%)" readonly="true"/>
+      <field name="positiveRiskDrivers" title="Increasing Risk Factors" readonly="true"
+        widget="Text" colSpan="6"/>
+      <field name="negativeRiskDrivers" title="Decreasing Risk Factors" readonly="true"
+        widget="Text" colSpan="6"/>
+    </panel>
+  </form>
+
+</object-views>
