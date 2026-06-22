@@ -18,6 +18,9 @@
   <menuitem name="lake-menu-customer-predictions" parent="lake-menu-root"
     title="Customer Predictions" action="lake.customer.predictions.view"/>
 
+  <menuitem name="lake-menu-ai-agent" parent="lake-menu-root" title="AI Agent"
+    action="lake.ai.agent.view"/>
+
   <menuitem name="lake-menu-lakehouse-table" parent="lake-menu-root"
     title="Lakehouse Tables" action="lake.lakehouse.table.all"/>
 

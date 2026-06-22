@@ -48,13 +48,9 @@ public interface LakehouseService {
 
   void prepareProfilingDataAsync(String tableName, String metadataPath) throws SQLException;
 
+  int publishCustomerPredictions(String tableName) throws SQLException;
+
   String getLatestMetadataPath(String tableName) throws IOException, InterruptedException;
 
   void deleteTable(String tableName) throws IOException, InterruptedException;
-
-  void trainTelecomModel(String tableName) throws IOException, InterruptedException;
-
-  void predictTelecomData(String tableName) throws IOException, InterruptedException;
-
-  void runCustomerRiskWorkflow(String tableName) throws IOException, InterruptedException;
 }

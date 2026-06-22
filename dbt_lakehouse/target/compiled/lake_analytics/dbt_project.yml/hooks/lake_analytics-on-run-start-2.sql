@@ -1,0 +1,1 @@
+CREATE SCHEMA IF NOT EXISTS iceberg_lake.lake_staging;

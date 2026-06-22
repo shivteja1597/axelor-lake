@@ -1,0 +1,1 @@
+INSTALL iceberg; LOAD iceberg;

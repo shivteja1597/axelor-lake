@@ -1,14 +1,10 @@
 
   
   create view "memory"."main"."stg_employee__dbt_tmp" as (
-    -- Staging model: reads employee data from lake-staging
--- Uses read_parquet with glob pattern to avoid hardcoding UUID-based Iceberg paths
--- This reliably picks up all parquet data files regardless of table UUID
-
-
+    -- Staging model: reads employee data from lake-raw CSV uploads
 with raw_source as (
     select *
-    from read_parquet('s3://lake-staging/my_data/data_*/data/*.parquet')
+    from read_csv_auto('s3://lake-raw/*/*.csv', header=true, sample_size=-1)
 )
 
 select

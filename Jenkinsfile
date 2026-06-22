@@ -4,6 +4,21 @@ pipeline {
   environment {
     WORKSPACE_DIR = '/var/jenkins_home/project'
     DBT_DIR = "${WORKSPACE_DIR}/dbt_lakehouse"
+    AXELOR_PUBLISH_BASE_URL = 'http://host.docker.internal:8060/axelor-erp'
+    AXELOR_CALLBACK_USER = 'admin'
+    AXELOR_CALLBACK_PASSWORD = 'admin'
+    MINIO_ENDPOINT = 'http://minio:9000'
+    MINIO_ENDPOINT_HOSTPORT = 'minio:9000'
+    MINIO_ACCESS_KEY = 'admin'
+    MINIO_SECRET_KEY = 'password123'
+    MINIO_REGION = 'us-east-1'
+    ICEBERG_REST_URI = 'http://nessie:19120/iceberg'
+    ICEBERG_WAREHOUSE = 'warehouse'
+    ICEBERG_CATALOG_ALIAS = 'iceberg_lake'
+  }
+
+  parameters {
+    string(name: 'TABLE_NAME', defaultValue: '', description: 'Lake dataset name')
   }
 
   stages {
@@ -20,20 +35,13 @@ pipeline {
       steps {
         dir("${WORKSPACE_DIR}") {
           script {
-            env.LAKE_DATASET_KIND = sh(
-              script: '''
-                python3 -c "import json, urllib.request; data = json.load(urllib.request.urlopen('http://lakehouse-api:8000/datasets/latest')); print(data.get('dataset_kind', 'unknown'))"
-              ''',
-              returnStdout: true
-            ).trim()
-            env.LAKE_METADATA_PATH = sh(
-              script: '''
-                python3 -c "import json, urllib.request; data = json.load(urllib.request.urlopen('http://lakehouse-api:8000/datasets/latest')); print(data.get('metadata_path', ''))"
-              ''',
-              returnStdout: true
-            ).trim()
+            env.LAKE_TABLE_NAME = (params.TABLE_NAME ?: env.TABLE_NAME ?: env.table_name ?: '').trim()
+            if (!env.LAKE_TABLE_NAME) {
+              error('TABLE_NAME is required for the lakehouse pipeline.')
+            }
+            env.LAKE_DATASET_KIND = env.LAKE_TABLE_NAME == 'customer_profile' ? 'customer_profile' : 'employee_profile'
             echo "Detected lakehouse dataset kind: ${env.LAKE_DATASET_KIND}"
-            echo "Latest metadata path: ${env.LAKE_METADATA_PATH}"
+            echo "Lake table name: ${env.LAKE_TABLE_NAME}"
           }
         }
       }
@@ -54,15 +62,18 @@ pipeline {
             pip install --no-cache-dir --upgrade pip setuptools wheel
 
             # Install dbt dependencies securely in workspace
-            pip install --no-cache-dir dbt-duckdb
+            pip install --no-cache-dir dbt-duckdb==1.10.1 duckdb==1.5.3
 
             # Navigate to dbt project explicitly using the absolute directory
             cd dbt_lakehouse
+            export EMPLOYEE_DATA_GLOB="s3://lake-raw/${LAKE_TABLE_NAME}/*.csv"
 
             # Run dbt pipelines
             dbt deps
-            dbt run --profiles-dir . --select stg_employee+
-            dbt test --profiles-dir . --select stg_employee+
+            dbt run --profiles-dir . --select stg_employee dim_employee
+            dbt run --profiles-dir . --select employee_salary_band employee_role_summary employee_manager_summary
+            dbt run --profiles-dir . --select employee_department_salary_summary
+            dbt test --profiles-dir . --select dim_employee+
           '''
         }
       }
@@ -78,26 +89,28 @@ pipeline {
             python3 -m venv dbt_venv
             . dbt_venv/bin/activate
             pip install --no-cache-dir --upgrade pip setuptools wheel
-            pip install --no-cache-dir dbt-duckdb pandas scikit-learn joblib boto3
-            export CUSTOMER_PROFILE_DATA_GLOB="$(python3 - <<'PY'
-from urllib.parse import urlparse
-import os
-
-metadata_path = os.environ.get('LAKE_METADATA_PATH', '').strip()
-if not metadata_path:
-    raise SystemExit('LAKE_METADATA_PATH is not set for customer workflow')
-
-parsed = urlparse(metadata_path)
-path = parsed.path.lstrip('/')
-prefix = path.rsplit('/metadata/', 1)[0]
-print(f"s3://{parsed.netloc}/{prefix}/data/*.parquet")
-PY
-)"
+            pip install --no-cache-dir dbt-duckdb==1.10.1 duckdb==1.5.3 pandas scikit-learn joblib boto3
+            export CUSTOMER_PROFILE_DATA_GLOB="s3://lake-raw/${LAKE_TABLE_NAME}/*.csv"
             cd dbt_lakehouse
             dbt deps
-            dbt run --profiles-dir . --select stg_customer_profile+
+            dbt run --profiles-dir . --select stg_customer_profile customer_profile_features
             cd ..
-            python lakehouse-api/ml/customer_risk.py
+            python python-ml/customer_risk.py
+            cd dbt_lakehouse
+            dbt run --profiles-dir . --select customer_predictions customer_segments
+            cd ..
+
+            echo "Publishing customer predictions to Axelor PostgreSQL..."
+            echo "Axelor publish URL: ${AXELOR_PUBLISH_BASE_URL}/ws/lake/customer-predictions/publish?tableName=${LAKE_TABLE_NAME}"
+            response_file="$(mktemp)"
+            http_code="$(curl --show-error --silent --output "${response_file}" --write-out "%{http_code}" \
+              --user "${AXELOR_CALLBACK_USER}:${AXELOR_CALLBACK_PASSWORD}" \
+              -X POST "${AXELOR_PUBLISH_BASE_URL}/ws/lake/customer-predictions/publish?tableName=${LAKE_TABLE_NAME}")"
+            cat "${response_file}"
+            if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+              echo "Axelor publish failed with HTTP ${http_code}"
+              exit 1
+            fi
           '''
         }
       }

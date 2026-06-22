@@ -18,29 +18,36 @@
  */
 package com.axelor.lake.service;
 
+import com.axelor.app.AppSettings;
 import com.axelor.concurrent.ContextAware;
 import com.axelor.db.JPA;
 import com.axelor.db.tenants.TenantResolver;
+import com.axelor.lake.db.LakeCustomerPrediction;
 import com.axelor.lake.db.LakeDepartment;
 import com.axelor.lake.db.LakeEmployee;
 import com.axelor.lake.db.LakeRole;
 import com.axelor.lake.db.LakeStatus;
 import com.axelor.lake.db.LakehouseTable;
 import com.axelor.lake.db.repo.LakehouseTableRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import com.google.inject.persist.Transactional;
+import io.minio.BucketExistsArgs;
+import io.minio.ListObjectsArgs;
+import io.minio.MakeBucketArgs;
+import io.minio.MinioClient;
+import io.minio.RemoveObjectArgs;
+import io.minio.Result;
+import io.minio.UploadObjectArgs;
+import io.minio.messages.Item;
 import jakarta.persistence.EntityManager;
-import java.io.BufferedInputStream;
-import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.math.BigDecimal;
-import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -48,6 +55,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -58,13 +66,13 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
@@ -83,7 +91,9 @@ public class LakehouseServiceImpl implements LakehouseService {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final int BUFFER_SIZE = 8192;
   private static final int EMPLOYEE_SYNC_BATCH_SIZE = 2000;
+  private static final int PREDICTION_SYNC_BATCH_SIZE = 1000;
   private static final Pattern TABLE_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9_]+$");
+  private static final String ICEBERG_TABLE_PREFIX = "iceberg-table:";
 
   private final LakehouseTableRepository lakehouseTableRepository;
   private final HttpClient httpClient;
@@ -118,10 +128,12 @@ public class LakehouseServiceImpl implements LakehouseService {
   public LakehouseTable uploadToLakehouse(File csv, String tableName, boolean triggerPipeline)
       throws IOException, InterruptedException, SQLException {
     final String normalizedTableName = validateCsv(csv, tableName);
-
-    final JsonNode payload = sendMultipartUpload(csv, normalizedTableName);
-    final String metadataPath = getRequiredText(payload, "metadata_path");
-    final long uploadedRowCount = payload.path("row_count").asLong(0L);
+    // Replace-mode upload: keep only the latest raw dataset for each logical table.
+    deletePrefix(getMinioRawBucket(), normalizedTableName + "/");
+    final String rawObjectKey = buildRawObjectKey(normalizedTableName, csv.getName());
+    uploadRawCsv(csv.toPath(), rawObjectKey);
+    final String metadataPath = getStagingIcebergTableReference(normalizedTableName);
+    final long uploadedRowCount = countCsvRows(csv.toPath());
 
     LakehouseTable record =
         lakehouseTableRepository
@@ -141,11 +153,10 @@ public class LakehouseServiceImpl implements LakehouseService {
       triggerPipeline(normalizedTableName);
     }
 
-    final boolean profileCompatible = isProfileCompatibleTable(metadataPath);
-    if (profileCompatible) {
+    if (triggerPipeline) {
       record.setSyncStatus(SYNC_STATUS_PENDING);
       record.setLastSyncAt(null);
-      record.setSyncMessage("Profile data sync is running in background.");
+      record.setSyncMessage("dbt lakehouse pipeline is running in Jenkins.");
     } else {
       record.setSyncStatus(SYNC_STATUS_READY);
       record.setLastSyncAt(LocalDateTime.now());
@@ -153,28 +164,9 @@ public class LakehouseServiceImpl implements LakehouseService {
     }
     record = lakehouseTableRepository.save(record);
 
-    scheduleEmployeesSyncIfNeeded(normalizedTableName, metadataPath, profileCompatible);
-
     return record;
   }
 
-  @Override
-  public void trainTelecomModel(String tableName) throws IOException, InterruptedException {
-    invokeTelecomMlEndpoint("/ml/telecom-churn/train", tableName);
-  }
-
-  @Override
-  public void predictTelecomData(String tableName) throws IOException, InterruptedException {
-    invokeTelecomMlEndpoint("/ml/telecom-churn/predict", tableName);
-  }
-
-  @Override
-  public void runCustomerRiskWorkflow(String tableName) throws IOException, InterruptedException {
-    final String normalizedTableName = validateTableName(tableName);
-    invokeCustomerMlEndpoint("/ml/customer-risk/trigger", normalizedTableName);
-  }
-
-  @Override
   public List<Map<String, Object>> queryFromLakehouse(String tableName)
       throws IOException, InterruptedException, SQLException {
     return queryFromLakehouse(tableName, 0);
@@ -219,70 +211,172 @@ public class LakehouseServiceImpl implements LakehouseService {
   }
 
   @Override
+  public int publishCustomerPredictions(String tableName) throws SQLException {
+    final String normalizedTableName = validateTableName(tableName);
+    if (!isCustomerPredictionTable(normalizedTableName)) {
+      throw new IllegalArgumentException(
+          "Customer prediction publish is only supported for customer_profile.");
+    }
+    try {
+      return syncCustomerPredictions(normalizedTableName);
+    } catch (Exception e) {
+      JPA.runInTransaction(
+          () ->
+              updateSyncStatus(
+                  normalizedTableName,
+                  SYNC_STATUS_FAILED,
+                  abbreviateMessage(e.getMessage(), 1000),
+                  LocalDateTime.now()));
+      throw e;
+    }
+  }
+
+  @Override
   public String getLatestMetadataPath(String tableName) throws IOException, InterruptedException {
-    final String encodedTableName = URLEncoder.encode(tableName, StandardCharsets.UTF_8);
-    final HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(getFastApiBaseUrl() + "/metadata/" + encodedTableName))
-            .timeout(Duration.ofSeconds(20))
-            .GET()
-            .build();
-
-    final HttpResponse<String> response =
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "FastAPI metadata lookup failed");
-
-    final JsonNode payload = OBJECT_MAPPER.readTree(response.body());
-    return getRequiredText(payload, "metadata_path");
+    final String normalizedTableName = validateTableName(tableName);
+    LakehouseTable table =
+        lakehouseTableRepository
+            .all()
+            .filter("self.tableName = ?1", normalizedTableName)
+            .fetchOne();
+    if (table == null || table.getMetadataPath() == null || table.getMetadataPath().isBlank()) {
+      throw new IllegalStateException(
+          "No lakehouse metadata found for table: " + normalizedTableName);
+    }
+    return table.getMetadataPath();
   }
 
   @Override
   public void deleteTable(String tableName) throws IOException, InterruptedException {
     final String normalizedTableName = validateTableName(tableName);
-    final String encodedTableName = URLEncoder.encode(normalizedTableName, StandardCharsets.UTF_8);
-    final HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(getFastApiBaseUrl() + "/tables/" + encodedTableName))
-            .timeout(Duration.ofMinutes(2))
-            .DELETE()
-            .build();
+    deletePrefix(getMinioRawBucket(), normalizedTableName + "/");
 
-    final HttpResponse<String> response =
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "FastAPI lakehouse delete failed");
+    for (String objectPath : getDerivedArtifactPaths(normalizedTableName)) {
+      deleteObjectAtPathIfPresent(objectPath);
+    }
+    deletePublishedPredictionData(normalizedTableName);
   }
 
-  private JsonNode sendMultipartUpload(File csv, String tableName) throws IOException {
-    final String boundary = "----LakehouseBoundary" + UUID.randomUUID();
-    final String fileName = csv.getName();
-    final String probedContentType = Files.probeContentType(csv.toPath());
-    final String contentType = probedContentType != null ? probedContentType : "text/csv";
+  private String uploadRawCsv(Path csvPath, String objectKey) throws IOException {
+    ensureBucketExists(getMinioRawBucket());
 
-    final HttpURLConnection connection =
-        (HttpURLConnection) URI.create(getFastApiBaseUrl() + "/upload").toURL().openConnection();
-    connection.setConnectTimeout((int) Duration.ofSeconds(10).toMillis());
-    connection.setReadTimeout((int) Duration.ofMinutes(15).toMillis());
-    connection.setDoOutput(true);
-    connection.setRequestMethod("POST");
-    connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-    connection.setChunkedStreamingMode(BUFFER_SIZE);
-
-    try (OutputStream outputStream = connection.getOutputStream();
-        BufferedInputStream fileStream =
-            new BufferedInputStream(Files.newInputStream(csv.toPath()))) {
-      writeFormField(outputStream, boundary, "table_name", tableName);
-      writeFileField(outputStream, boundary, "file", fileName, contentType, fileStream);
-      outputStream.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-      outputStream.flush();
+    try {
+      minioClient()
+          .uploadObject(
+              UploadObjectArgs.builder()
+                  .bucket(getMinioRawBucket())
+                  .object(objectKey)
+                  .filename(csvPath.toString())
+                  .contentType("text/csv")
+                  .build());
+    } catch (Exception e) {
+      throw new IOException("Unable to upload CSV to MinIO.", e);
     }
 
-    final int statusCode = connection.getResponseCode();
-    final String responseBody = readResponseBody(connection, statusCode);
-    if (statusCode / 100 != 2) {
-      throw new IllegalStateException("FastAPI upload failed: " + statusCode + " " + responseBody);
+    return "s3://" + getMinioRawBucket() + "/" + objectKey;
+  }
+
+  private long countCsvRows(Path csvPath) throws IOException {
+    try (BufferedReader reader = Files.newBufferedReader(csvPath, StandardCharsets.UTF_8)) {
+      long count = -1L;
+      while (reader.readLine() != null) {
+        count++;
+      }
+      return Math.max(0L, count);
+    }
+  }
+
+  private String buildRawObjectKey(String tableName, String fileName) {
+    String sanitizedName = fileName == null || fileName.isBlank() ? tableName + ".csv" : fileName;
+    return tableName + "/" + System.currentTimeMillis() + "_" + sanitizedName;
+  }
+
+  private MinioClient minioClient() {
+    return MinioClient.builder()
+        .endpoint(getMinioEndpoint())
+        .credentials(getMinioAccessKey(), getMinioSecretKey())
+        .build();
+  }
+
+  private void ensureBucketExists(String bucketName) throws IOException {
+    try {
+      MinioClient minioClient = minioClient();
+      boolean exists =
+          minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build());
+      if (!exists) {
+        minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
+      }
+    } catch (Exception e) {
+      throw new IOException("Unable to ensure MinIO bucket exists: " + bucketName, e);
+    }
+  }
+
+  private void deleteObjectAtPathIfPresent(String objectPath) throws IOException {
+    if (objectPath == null || objectPath.isBlank() || !objectPath.startsWith("s3://")) {
+      return;
     }
 
-    return OBJECT_MAPPER.readTree(responseBody);
+    String withoutScheme = objectPath.substring("s3://".length());
+    int slashIndex = withoutScheme.indexOf('/');
+    if (slashIndex < 0) {
+      return;
+    }
+
+    deleteObject(withoutScheme.substring(0, slashIndex), withoutScheme.substring(slashIndex + 1));
+  }
+
+  private void deleteObject(String bucketName, String objectName) throws IOException {
+    if (bucketName == null || bucketName.isBlank() || objectName == null || objectName.isBlank()) {
+      return;
+    }
+
+    try {
+      minioClient()
+          .removeObject(RemoveObjectArgs.builder().bucket(bucketName).object(objectName).build());
+    } catch (Exception e) {
+      throw new IOException(
+          "Unable to delete MinIO object: s3://" + bucketName + "/" + objectName, e);
+    }
+  }
+
+  private void deletePrefix(String bucketName, String prefix) throws IOException {
+    if (bucketName == null || bucketName.isBlank() || prefix == null || prefix.isBlank()) {
+      return;
+    }
+
+    try {
+      for (Result<Item> result :
+          minioClient()
+              .listObjects(
+                  ListObjectsArgs.builder()
+                      .bucket(bucketName)
+                      .prefix(prefix)
+                      .recursive(true)
+                      .build())) {
+        Item item = result.get();
+        if (item != null && item.objectName() != null && !item.objectName().isBlank()) {
+          deleteObject(bucketName, item.objectName());
+        }
+      }
+    } catch (Exception e) {
+      throw new IOException("Unable to delete MinIO objects for prefix: " + prefix, e);
+    }
+  }
+
+  private List<String> getDerivedArtifactPaths(String tableName) {
+    if ("customer_profile".equalsIgnoreCase(tableName)) {
+      return List.of(
+          "s3://" + getMinioCuratedBucket() + "/customer_profile_features.parquet",
+          "s3://" + getMinioAnalyticsBucket() + "/customer_predictions.parquet",
+          "s3://" + getMinioAnalyticsBucket() + "/customer_segments.parquet",
+          "s3://" + getMinioModelsBucket() + "/customer-risk/logistic_regression.joblib");
+    }
+    return List.of(
+        "s3://" + getMinioCuratedBucket() + "/dim_employee.parquet",
+        "s3://" + getMinioAnalyticsBucket() + "/employee_role_summary.parquet",
+        "s3://" + getMinioAnalyticsBucket() + "/employee_manager_summary.parquet",
+        "s3://" + getMinioAnalyticsBucket() + "/employee_department_salary_summary.parquet",
+        "s3://" + getMinioAnalyticsBucket() + "/employee_salary_band.parquet");
   }
 
   private void scheduleEmployeesSyncIfNeeded(
@@ -387,6 +481,70 @@ public class LakehouseServiceImpl implements LakehouseService {
         });
   }
 
+  private int syncCustomerPredictions(String tableName) throws SQLException {
+    return syncCustomerPredictionsFromIceberg(
+        tableName, getCustomerPredictionsIcebergTableReference());
+  }
+
+  private int syncCustomerPredictionsFromIceberg(String tableName, String metadataPath)
+      throws SQLException {
+    publishSyncProgress(tableName, "Publishing customer predictions from Iceberg to PostgreSQL...");
+
+    final List<LakeCustomerPrediction> predictions = new ArrayList<>();
+    int scannedRowCount = 0;
+
+    try (Connection connection =
+            DriverManager.getConnection(
+                getPgDuckDbJdbcUrl(), getPgDuckDbUsername(), getPgDuckDbPassword());
+        Statement statement = createLakehouseStatement(connection);
+        ResultSet resultSet = statement.executeQuery(buildLakehouseQuery(metadataPath, 0))) {
+      final Map<String, Integer> columnIndexes = resolveColumnIndexes(resultSet.getMetaData());
+      while (resultSet.next()) {
+        scannedRowCount++;
+
+        LakeCustomerPrediction prediction = new LakeCustomerPrediction();
+        prediction.setAccountId(getRequiredRowValue(resultSet, columnIndexes, "account_id"));
+        prediction.setSiteId(getOptionalRowValue(resultSet, columnIndexes, "site_id"));
+        prediction.setCustomerName(getRequiredRowValue(resultSet, columnIndexes, "customer_name"));
+        prediction.setState(getOptionalRowValue(resultSet, columnIndexes, "state"));
+        prediction.setContractStatus(
+            getOptionalRowValue(resultSet, columnIndexes, "contract_status"));
+        prediction.setPlanType(getOptionalRowValue(resultSet, columnIndexes, "plan_type"));
+        prediction.setCurrentRmr(getOptionalDecimalValue(resultSet, columnIndexes, "current_rmr"));
+        prediction.setCustomerSegmentBucket(
+            getOptionalRowValue(resultSet, columnIndexes, "customer_segment_bucket"));
+        prediction.setChurnRiskPercentage(
+            getOptionalDecimalValue(resultSet, columnIndexes, "churn_risk_percentage"));
+        prediction.setRiskSegment(getOptionalRowValue(resultSet, columnIndexes, "risk_segment"));
+        predictions.add(prediction);
+
+        if (scannedRowCount % PREDICTION_SYNC_BATCH_SIZE == 0) {
+          publishSyncProgress(
+              tableName,
+              String.format(
+                  Locale.ROOT,
+                  "Publishing customer predictions... %,d rows scanned.",
+                  scannedRowCount));
+        }
+      }
+    }
+
+    final int finalScannedRowCount = scannedRowCount;
+    JPA.runInTransaction(
+        () -> {
+          bulkReplaceCustomerPredictions(predictions);
+          updateSyncStatus(
+              tableName,
+              SYNC_STATUS_COMPLETED,
+              String.format(
+                  Locale.ROOT,
+                  "Customer predictions published to PostgreSQL. %,d rows loaded.",
+                  finalScannedRowCount),
+              LocalDateTime.now());
+        });
+    return finalScannedRowCount;
+  }
+
   private void publishSyncProgress(String tableName, String syncMessage) {
     JPA.runInTransaction(() -> updateSyncStatus(tableName, SYNC_STATUS_PENDING, syncMessage, null));
   }
@@ -444,6 +602,47 @@ public class LakehouseServiceImpl implements LakehouseService {
                   batchSize++;
 
                   if (batchSize % EMPLOYEE_SYNC_BATCH_SIZE == 0) {
+                    statement.executeBatch();
+                  }
+                }
+                statement.executeBatch();
+              }
+            });
+  }
+
+  private void bulkReplaceCustomerPredictions(List<LakeCustomerPrediction> predictions) {
+    JPA.em()
+        .unwrap(Session.class)
+        .doWork(
+            connection -> {
+              truncateTable(
+                  connection, "lake_lake_customer_prediction", "lake_lake_customer_prediction_seq");
+              if (predictions.isEmpty()) {
+                return;
+              }
+
+              try (PreparedStatement statement =
+                  connection.prepareStatement(
+                      "INSERT INTO lake_lake_customer_prediction "
+                          + "(id, version, account_id, site_id, customer_name, state, contract_status, "
+                          + "plan_type, current_rmr, customer_segment_bucket, churn_risk_percentage, risk_segment) "
+                          + "VALUES (nextval('lake_lake_customer_prediction_seq'), 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                int batchSize = 0;
+                for (LakeCustomerPrediction prediction : predictions) {
+                  statement.setString(1, prediction.getAccountId());
+                  statement.setString(2, prediction.getSiteId());
+                  statement.setString(3, prediction.getCustomerName());
+                  statement.setString(4, prediction.getState());
+                  statement.setString(5, prediction.getContractStatus());
+                  statement.setString(6, prediction.getPlanType());
+                  statement.setBigDecimal(7, prediction.getCurrentRmr());
+                  statement.setString(8, prediction.getCustomerSegmentBucket());
+                  statement.setBigDecimal(9, prediction.getChurnRiskPercentage());
+                  statement.setString(10, prediction.getRiskSegment());
+                  statement.addBatch();
+                  batchSize++;
+
+                  if (batchSize % PREDICTION_SYNC_BATCH_SIZE == 0) {
                     statement.executeBatch();
                   }
                 }
@@ -563,10 +762,67 @@ public class LakehouseServiceImpl implements LakehouseService {
         .executeUpdate();
   }
 
+  private boolean isCustomerPredictionTable(String tableName) {
+    return "customer_profile".equalsIgnoreCase(tableName);
+  }
+
+  private void deletePublishedPredictionData(String tableName) {
+    if (!isCustomerPredictionTable(tableName)) {
+      return;
+    }
+    JPA.runInTransaction(
+        () -> JPA.em().createQuery("DELETE FROM LakeCustomerPrediction").executeUpdate());
+  }
+
   private Statement createLakehouseStatement(Connection connection) throws SQLException {
     final Statement statement = connection.createStatement();
     statement.setFetchSize(EMPLOYEE_SYNC_BATCH_SIZE);
+    configureDuckDbIcebergCatalog(statement);
     return statement;
+  }
+
+  private void configureDuckDbIcebergCatalog(Statement statement) throws SQLException {
+    executeDuckDbCommand(statement, "INSTALL httpfs");
+    executeDuckDbCommand(statement, "LOAD httpfs");
+    executeDuckDbCommand(statement, "INSTALL iceberg");
+    executeDuckDbCommand(statement, "LOAD iceberg");
+
+    String endpoint = getPgDuckDbMinioEndpoint().replace("http://", "").replace("https://", "");
+    executeDuckDbCommand(statement, "SET s3_endpoint='" + escapeSql(endpoint) + "'");
+    executeDuckDbCommand(
+        statement, "SET s3_access_key_id='" + escapeSql(getMinioAccessKey()) + "'");
+    executeDuckDbCommand(
+        statement, "SET s3_secret_access_key='" + escapeSql(getMinioSecretKey()) + "'");
+    executeDuckDbCommand(statement, "SET s3_region='" + escapeSql(getIcebergS3Region()) + "'");
+    executeDuckDbCommand(statement, "SET s3_use_ssl=false");
+    executeDuckDbCommand(statement, "SET s3_url_style='path'");
+    executeDuckDbCommand(
+        statement,
+        "ATTACH '"
+            + escapeSql(getIcebergWarehouse())
+            + "' AS "
+            + sanitizeIdentifier(getIcebergCatalogAlias())
+            + " (TYPE iceberg, ENDPOINT '"
+            + escapeSql(getPgDuckDbIcebergRestUri())
+            + "', AUTHORIZATION_TYPE 'none')",
+        true);
+  }
+
+  private void executeDuckDbCommand(Statement statement, String command) throws SQLException {
+    executeDuckDbCommand(statement, command, false);
+  }
+
+  private void executeDuckDbCommand(
+      Statement statement, String command, boolean ignoreAlreadyAttached) throws SQLException {
+    try {
+      statement.execute("SELECT duckdb.raw_query('" + escapeSql(command) + "')");
+    } catch (SQLException e) {
+      String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+      if (ignoreAlreadyAttached && message.contains("already")) {
+        return;
+      }
+      throw e;
+    }
   }
 
   private String buildLakehouseQuery(String metadataPath, int limit) {
@@ -574,11 +830,77 @@ public class LakehouseServiceImpl implements LakehouseService {
       throw new IllegalArgumentException("Metadata path is required.");
     }
 
-    return "SELECT * FROM duckdb.query('SELECT * FROM iceberg_scan(''"
-        + escapeSql(metadataPath)
-        + "'')"
-        + buildLimitClause(limit)
-        + "')";
+    String normalizedPath = metadataPath.trim().toLowerCase(Locale.ROOT);
+    String sourceQuery;
+    if (normalizedPath.startsWith(ICEBERG_TABLE_PREFIX)) {
+      sourceQuery =
+          "SELECT * FROM "
+              + sanitizeQualifiedIdentifier(
+                  metadataPath.trim().substring(ICEBERG_TABLE_PREFIX.length()))
+              + buildLimitClause(limit);
+    } else if (normalizedPath.endsWith(".csv")) {
+      sourceQuery =
+          "SELECT * FROM read_csv_auto(''"
+              + escapeSql(metadataPath)
+              + "'', HEADER=TRUE, SAMPLE_SIZE=-1)"
+              + buildLimitClause(limit);
+    } else if (normalizedPath.endsWith(".parquet")) {
+      sourceQuery =
+          "SELECT * FROM read_parquet(''"
+              + escapeSql(metadataPath)
+              + "'')"
+              + buildLimitClause(limit);
+    } else {
+      sourceQuery =
+          "SELECT * FROM iceberg_scan(''"
+              + escapeSql(metadataPath)
+              + "'')"
+              + buildLimitClause(limit);
+    }
+
+    return "SELECT * FROM duckdb.query('" + sourceQuery + "')";
+  }
+
+  private String getStagingIcebergTableReference(String tableName) {
+    String modelName =
+        isCustomerPredictionTable(tableName) ? "stg_customer_profile" : "stg_employee";
+    return buildIcebergTableReference(getIcebergStagingSchema(), modelName);
+  }
+
+  private String getCustomerPredictionsIcebergTableReference() {
+    return buildIcebergTableReference(getIcebergAnalyticsSchema(), "customer_predictions");
+  }
+
+  private String buildIcebergTableReference(String schemaName, String tableName) {
+    return ICEBERG_TABLE_PREFIX
+        + sanitizeIdentifier(getIcebergCatalogAlias())
+        + "."
+        + sanitizeIdentifier(schemaName)
+        + "."
+        + sanitizeIdentifier(tableName);
+  }
+
+  private String sanitizeQualifiedIdentifier(String tableReference) {
+    if (tableReference == null || tableReference.isBlank()) {
+      throw new IllegalArgumentException("Iceberg table reference is required.");
+    }
+    String[] parts = tableReference.trim().split("\\.");
+    if (parts.length != 3) {
+      throw new IllegalArgumentException(
+          "Iceberg table reference must be catalog.schema.table: " + tableReference);
+    }
+    List<String> sanitizedParts = new ArrayList<>();
+    for (String part : parts) {
+      sanitizedParts.add(sanitizeIdentifier(part));
+    }
+    return String.join(".", sanitizedParts);
+  }
+
+  private String sanitizeIdentifier(String identifier) {
+    if (identifier == null || !TABLE_NAME_PATTERN.matcher(identifier.trim()).matches()) {
+      throw new IllegalArgumentException("Invalid identifier: " + identifier);
+    }
+    return identifier.trim();
   }
 
   private Map<String, Integer> resolveColumnIndexes(ResultSetMetaData metaData)
@@ -649,6 +971,21 @@ public class LakehouseServiceImpl implements LakehouseService {
     }
   }
 
+  private BigDecimal getOptionalDecimalValue(
+      ResultSet resultSet, Map<String, Integer> columnIndexes, String... candidateColumns)
+      throws SQLException {
+    final String value = getOptionalRowValue(resultSet, columnIndexes, candidateColumns);
+    if (value == null) {
+      return null;
+    }
+    try {
+      return new BigDecimal(value);
+    } catch (NumberFormatException e) {
+      throw new IllegalStateException(
+          "Invalid decimal value for columns: " + String.join(", ", candidateColumns), e);
+    }
+  }
+
   private String getRequiredRowValue(
       ResultSet resultSet, Map<String, Integer> columnIndexes, String... candidateColumns)
       throws SQLException {
@@ -697,61 +1034,6 @@ public class LakehouseServiceImpl implements LakehouseService {
     return value.replaceAll("[^A-Za-z0-9]", "").toLowerCase(Locale.ROOT);
   }
 
-  private void writeFormField(OutputStream outputStream, String boundary, String name, String value)
-      throws IOException {
-    outputStream.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
-    outputStream.write(
-        ("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n")
-            .getBytes(StandardCharsets.UTF_8));
-    outputStream.write(value.getBytes(StandardCharsets.UTF_8));
-    outputStream.write("\r\n".getBytes(StandardCharsets.UTF_8));
-  }
-
-  private void writeFileField(
-      OutputStream outputStream,
-      String boundary,
-      String fieldName,
-      String fileName,
-      String contentType,
-      InputStream fileStream)
-      throws IOException {
-    outputStream.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
-    outputStream.write(
-        ("Content-Disposition: form-data; name=\""
-                + fieldName
-                + "\"; filename=\""
-                + fileName
-                + "\"\r\n")
-            .getBytes(StandardCharsets.UTF_8));
-    outputStream.write(
-        ("Content-Type: " + contentType + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-
-    final byte[] buffer = new byte[BUFFER_SIZE];
-    int bytesRead;
-    while ((bytesRead = fileStream.read(buffer)) != -1) {
-      outputStream.write(buffer, 0, bytesRead);
-    }
-    outputStream.write("\r\n".getBytes(StandardCharsets.UTF_8));
-  }
-
-  private String readResponseBody(HttpURLConnection connection, int statusCode) throws IOException {
-    final InputStream inputStream =
-        statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream();
-    if (inputStream == null) {
-      return "";
-    }
-
-    try (InputStream responseStream = inputStream;
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
-      final byte[] bytes = new byte[BUFFER_SIZE];
-      int bytesRead;
-      while ((bytesRead = responseStream.read(bytes)) != -1) {
-        buffer.write(bytes, 0, bytesRead);
-      }
-      return buffer.toString(StandardCharsets.UTF_8);
-    }
-  }
-
   private List<Map<String, Object>> mapRows(ResultSet resultSet) throws SQLException {
     final ResultSetMetaData metaData = resultSet.getMetaData();
     final int columnCount = metaData.getColumnCount();
@@ -787,61 +1069,18 @@ public class LakehouseServiceImpl implements LakehouseService {
     return normalizedTableName;
   }
 
-  private void triggerPipeline(String tableName) throws IOException, InterruptedException {
-    triggerPipeline(tableName, false);
+  private String triggerPipeline(String tableName) throws IOException, InterruptedException {
+    return triggerPipeline(tableName, false);
   }
 
-  private void triggerPipeline(String tableName, boolean wait)
+  private String triggerPipeline(String tableName, boolean wait)
       throws IOException, InterruptedException {
     final String normalizedTableName = validateTableName(tableName);
-    final HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(
-                URI.create(
-                    getFastApiBaseUrl()
-                        + "/pipeline/run?wait="
-                        + wait
-                        + "&table_name="
-                        + URLEncoder.encode(normalizedTableName, StandardCharsets.UTF_8)))
-            .timeout(Duration.ofMinutes(15))
-            .POST(HttpRequest.BodyPublishers.noBody())
-            .build();
-
-    final HttpResponse<String> response =
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "FastAPI pipeline trigger failed");
-  }
-
-  private void invokeTelecomMlEndpoint(String endpointPath, String tableName)
-      throws IOException, InterruptedException {
-    final String normalizedTableName = validateTableName(tableName);
-    final String encodedTableName = URLEncoder.encode(normalizedTableName, StandardCharsets.UTF_8);
-    final HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(getFastApiBaseUrl() + endpointPath + "?table_name=" + encodedTableName))
-            .timeout(Duration.ofMinutes(15))
-            .POST(HttpRequest.BodyPublishers.noBody())
-            .build();
-
-    final HttpResponse<String> response =
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "FastAPI telecom ML request failed");
-  }
-
-  private void invokeCustomerMlEndpoint(String endpointPath, String tableName)
-      throws IOException, InterruptedException {
-    final String normalizedTableName = validateTableName(tableName);
-    final String encodedTableName = URLEncoder.encode(normalizedTableName, StandardCharsets.UTF_8);
-    final HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(getFastApiBaseUrl() + endpointPath + "?table_name=" + encodedTableName))
-            .timeout(Duration.ofMinutes(15))
-            .POST(HttpRequest.BodyPublishers.noBody())
-            .build();
-
-    final HttpResponse<String> response =
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "FastAPI customer ML request failed");
+    String queueUrl = enqueueJenkinsBuild(normalizedTableName);
+    if (wait) {
+      waitForJenkinsBuild(queueUrl);
+    }
+    return queueUrl;
   }
 
   private void ensureSuccess(HttpResponse<String> response, String message) {
@@ -851,12 +1090,245 @@ public class LakehouseServiceImpl implements LakehouseService {
     }
   }
 
-  private String getRequiredText(JsonNode payload, String fieldName) {
-    final String value = payload.path(fieldName).asText(null);
-    if (value == null || value.isBlank()) {
-      throw new IllegalStateException("Missing required field: " + fieldName);
+  private String enqueueJenkinsBuild(String tableName) throws IOException, InterruptedException {
+    String jobUrl = getJenkinsJobUrl();
+    if (jobUrl.isBlank()) {
+      throw new IllegalStateException("Jenkins job URL is not configured.");
     }
-    return value;
+
+    Map<String, String> headers = getJenkinsCrumbHeaders();
+    String triggerUrl = jobUrl + "/buildWithParameters";
+    List<String> queryParts = new ArrayList<>();
+    queryParts.add("TABLE_NAME=" + URLEncoder.encode(tableName, StandardCharsets.UTF_8));
+
+    String buildToken = getJenkinsBuildToken();
+    boolean useBuildToken = headers.isEmpty() && !buildToken.isBlank();
+    if (useBuildToken) {
+      queryParts.add("token=" + URLEncoder.encode(buildToken, StandardCharsets.UTF_8));
+    }
+    triggerUrl = triggerUrl + "?" + String.join("&", queryParts);
+
+    if (isWindowsHost() && !headers.isEmpty()) {
+      LOG.info("Triggering Jenkins via PowerShell for {}", jobUrl);
+      return triggerJenkinsViaPowerShell(triggerUrl);
+    }
+
+    HttpRequest.Builder requestBuilder =
+        HttpRequest.newBuilder()
+            .uri(URI.create(triggerUrl))
+            .timeout(Duration.ofSeconds(30))
+            .POST(HttpRequest.BodyPublishers.noBody());
+    headers.forEach(requestBuilder::header);
+
+    HttpResponse<String> response =
+        httpClient.send(
+            requestBuilder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    if (response.statusCode() != 200
+        && response.statusCode() != 201
+        && response.statusCode() != 202) {
+      throw new IllegalStateException(
+          "Jenkins pipeline trigger failed: "
+              + response.statusCode()
+              + " "
+              + response.body()
+              + " [jobUrl="
+              + jobUrl
+              + ", user="
+              + (getJenkinsUser().isBlank() ? "<blank>" : getJenkinsUser())
+              + ", userSource="
+              + describeSettingSource("axelor.lakehouse.jenkins.user", "JENKINS_USER")
+              + ", authPresent="
+              + !headers.isEmpty()
+              + ", apiToken="
+              + fingerprintSecret(getJenkinsApiToken())
+              + ", apiTokenSource="
+              + describeSettingSource("axelor.lakehouse.jenkins.api-token", "JENKINS_API_TOKEN")
+              + ", buildTokenUsed="
+              + useBuildToken
+              + "]");
+    }
+
+    return response
+        .headers()
+        .firstValue("Location")
+        .orElseThrow(() -> new IllegalStateException("Jenkins did not return a queue location."));
+  }
+
+  private String triggerJenkinsViaPowerShell(String triggerUrl)
+      throws IOException, InterruptedException {
+    Process process =
+        new ProcessBuilder(
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                buildPowerShellJenkinsTriggerScript(triggerUrl))
+            .redirectErrorStream(true)
+            .start();
+
+    String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    int exitCode = process.waitFor();
+    if (exitCode != 0) {
+      throw new IllegalStateException(
+          "PowerShell Jenkins trigger failed: " + normalizeProcessOutput(output));
+    }
+
+    String queueUrl =
+        output
+            .lines()
+            .map(String::trim)
+            .filter(line -> !line.isBlank())
+            .reduce((first, second) -> second)
+            .orElse("");
+    if (queueUrl.isBlank()) {
+      throw new IllegalStateException(
+          "PowerShell Jenkins trigger did not return a queue location.");
+    }
+    return queueUrl;
+  }
+
+  private String buildPowerShellJenkinsTriggerScript(String triggerUrl) {
+    return "$pair = '"
+        + escapePowerShellSingleQuoted(getJenkinsUser())
+        + ":"
+        + escapePowerShellSingleQuoted(getJenkinsApiToken())
+        + "'; "
+        + "$bytes = [System.Text.Encoding]::UTF8.GetBytes($pair); "
+        + "$basic = [Convert]::ToBase64String($bytes); "
+        + "$resp = Invoke-WebRequest -UseBasicParsing -Method Post "
+        + "-Headers @{ Authorization = ('Basic ' + $basic) } '"
+        + escapePowerShellSingleQuoted(triggerUrl)
+        + "'; "
+        + "$location = $resp.Headers['Location']; "
+        + "if (-not $location) { $location = $resp.BaseResponse.Headers['Location']; } "
+        + "if ($location -is [array]) { $location = $location[0]; } "
+        + "if (-not $location) { Write-Error 'Jenkins did not return a queue location.'; exit 1 } "
+        + "Write-Output $location";
+  }
+
+  private String escapePowerShellSingleQuoted(String value) {
+    return value.replace("'", "''");
+  }
+
+  private boolean isWindowsHost() {
+    return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+  }
+
+  private String normalizeProcessOutput(String output) {
+    String normalized = output == null ? "" : output.trim();
+    return normalized.isBlank() ? "<no output>" : normalized;
+  }
+
+  private void waitForJenkinsBuild(String queueUrl) throws IOException, InterruptedException {
+    long deadline = System.currentTimeMillis() + getJenkinsWaitTimeoutSeconds() * 1000L;
+    int buildNumber = waitForQueueExecutable(queueUrl, deadline);
+    waitForBuildCompletion(buildNumber, deadline);
+  }
+
+  private int waitForQueueExecutable(String queueUrl, long deadline)
+      throws IOException, InterruptedException {
+    while (System.currentTimeMillis() < deadline) {
+      HttpResponse<String> response =
+          sendAuthenticatedJenkinsRequest(
+              queueUrl + "/api/json", "GET", HttpRequest.BodyPublishers.noBody());
+      ensureSuccess(response, "Unable to inspect Jenkins queue item");
+      JsonNode payload = OBJECT_MAPPER.readTree(response.body());
+      JsonNode executable = payload.path("executable");
+      if (!executable.isMissingNode() && executable.has("number")) {
+        return executable.path("number").asInt();
+      }
+      if (payload.path("cancelled").asBoolean(false)) {
+        throw new IllegalStateException("Jenkins queue item was cancelled.");
+      }
+      Thread.sleep(getJenkinsPollIntervalMillis());
+    }
+
+    throw new IllegalStateException("Timed out waiting for Jenkins job to start.");
+  }
+
+  private void waitForBuildCompletion(int buildNumber, long deadline)
+      throws IOException, InterruptedException {
+    String buildApiUrl = getJenkinsJobUrl() + "/" + buildNumber + "/api/json";
+    while (System.currentTimeMillis() < deadline) {
+      HttpResponse<String> response =
+          sendAuthenticatedJenkinsRequest(buildApiUrl, "GET", HttpRequest.BodyPublishers.noBody());
+      ensureSuccess(response, "Unable to inspect Jenkins build result");
+      JsonNode payload = OBJECT_MAPPER.readTree(response.body());
+      if (!payload.path("building").asBoolean(false)) {
+        String result = payload.path("result").asText("UNKNOWN");
+        if (!"SUCCESS".equalsIgnoreCase(result)) {
+          throw new IllegalStateException("Jenkins pipeline failed with result: " + result);
+        }
+        return;
+      }
+      Thread.sleep(getJenkinsPollIntervalMillis());
+    }
+
+    throw new IllegalStateException("Timed out waiting for Jenkins build to finish.");
+  }
+
+  private HttpResponse<String> sendAuthenticatedJenkinsRequest(
+      String url, String method, HttpRequest.BodyPublisher bodyPublisher)
+      throws IOException, InterruptedException {
+    HttpRequest.Builder requestBuilder =
+        HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(30))
+            .method(method, bodyPublisher)
+            .header("Accept", "application/json");
+    getJenkinsAuthHeaders().forEach(requestBuilder::header);
+    return httpClient.send(
+        requestBuilder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+  }
+
+  private Map<String, String> getJenkinsCrumbHeaders() throws IOException, InterruptedException {
+    Map<String, String> headers = new LinkedHashMap<>(getJenkinsAuthHeaders());
+    // Jenkins accepts API-token authenticated build triggers without a CSRF crumb.
+    // Skipping the crumb lookup avoids 401 failures on crumbIssuer for secured setups.
+    if (!headers.isEmpty()) {
+      return headers;
+    }
+    if (getJenkinsUrl().isBlank()) {
+      return headers;
+    }
+
+    HttpRequest.Builder requestBuilder =
+        HttpRequest.newBuilder()
+            .uri(URI.create(getJenkinsUrl() + "/crumbIssuer/api/json"))
+            .timeout(Duration.ofSeconds(30))
+            .GET()
+            .header("Accept", "application/json");
+    headers.forEach(requestBuilder::header);
+
+    HttpResponse<String> response =
+        httpClient.send(
+            requestBuilder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    if (response.statusCode() == 404 || response.statusCode() == 403) {
+      return headers;
+    }
+
+    ensureSuccess(response, "Unable to fetch Jenkins crumb");
+    Map<String, Object> crumbPayload =
+        OBJECT_MAPPER.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+    Object crumbField = crumbPayload.get("crumbRequestField");
+    Object crumbValue = crumbPayload.get("crumb");
+    if (crumbField != null && crumbValue != null) {
+      headers.put(String.valueOf(crumbField), String.valueOf(crumbValue));
+    }
+    return headers;
+  }
+
+  private Map<String, String> getJenkinsAuthHeaders() {
+    String user = getJenkinsUser();
+    String apiToken = getJenkinsApiToken();
+    if (user.isBlank() || apiToken.isBlank()) {
+      return Map.of();
+    }
+
+    String encodedAuth =
+        Base64.getEncoder()
+            .encodeToString((user + ":" + apiToken).getBytes(StandardCharsets.UTF_8));
+    return Map.of("Authorization", "Basic " + encodedAuth);
   }
 
   private String escapeSql(String value) {
@@ -867,30 +1339,218 @@ public class LakehouseServiceImpl implements LakehouseService {
     return limit > 0 ? " LIMIT " + limit : "";
   }
 
-  private String getFastApiBaseUrl() {
-    return System.getProperty(
-        "axelor.lakehouse.fastapi.base-url",
-        System.getenv().getOrDefault("AXELOR_LAKEHOUSE_FASTAPI_BASE_URL", "http://localhost:8000"));
+  private String getMinioEndpoint() {
+    return getSetting(
+        "axelor.lakehouse.minio.endpoint",
+        "AXELOR_LAKEHOUSE_MINIO_ENDPOINT",
+        "http://localhost:9000");
+  }
+
+  private String getPgDuckDbMinioEndpoint() {
+    return getSetting(
+        "axelor.lakehouse.pgduckdb.minio.endpoint",
+        "AXELOR_LAKEHOUSE_PGDUCKDB_MINIO_ENDPOINT",
+        getMinioEndpoint());
+  }
+
+  private String getMinioAccessKey() {
+    return getSetting("axelor.lakehouse.minio.access-key", "MINIO_ACCESS_KEY", "admin");
+  }
+
+  private String getMinioSecretKey() {
+    return getSetting("axelor.lakehouse.minio.secret-key", "MINIO_SECRET_KEY", "password123");
+  }
+
+  private String getMinioRawBucket() {
+    return getSetting("axelor.lakehouse.minio.raw-bucket", "MINIO_RAW_BUCKET", "lake-raw");
+  }
+
+  private String getMinioStagingBucket() {
+    return getSetting(
+        "axelor.lakehouse.minio.staging-bucket", "MINIO_STAGING_BUCKET", "lake-staging");
+  }
+
+  private String getMinioCuratedBucket() {
+    return getSetting(
+        "axelor.lakehouse.minio.curated-bucket", "MINIO_CURATED_BUCKET", "lake-curated");
+  }
+
+  private String getMinioAnalyticsBucket() {
+    return getSetting(
+        "axelor.lakehouse.minio.analytics-bucket", "MINIO_ANALYTICS_BUCKET", "lake-analytics");
+  }
+
+  private String getMinioModelsBucket() {
+    return getSetting("axelor.lakehouse.minio.models-bucket", "MINIO_MODELS_BUCKET", "lake-models");
+  }
+
+  private String getIcebergCatalogAlias() {
+    return getSetting(
+        "axelor.lakehouse.iceberg.catalog-alias",
+        "AXELOR_LAKEHOUSE_ICEBERG_CATALOG_ALIAS",
+        "iceberg_lake");
+  }
+
+  private String getIcebergRestUri() {
+    return getSetting(
+        "axelor.lakehouse.iceberg.rest-uri",
+        "AXELOR_LAKEHOUSE_ICEBERG_REST_URI",
+        "http://localhost:19120/iceberg/main");
+  }
+
+  private String getPgDuckDbIcebergRestUri() {
+    return getSetting(
+        "axelor.lakehouse.pgduckdb.iceberg.rest-uri",
+        "AXELOR_LAKEHOUSE_PGDUCKDB_ICEBERG_REST_URI",
+        getIcebergRestUri());
+  }
+
+  private String getIcebergWarehouse() {
+    return getSetting(
+        "axelor.lakehouse.iceberg.warehouse", "AXELOR_LAKEHOUSE_ICEBERG_WAREHOUSE", "warehouse");
+  }
+
+  private String getIcebergStagingSchema() {
+    return getSetting(
+        "axelor.lakehouse.iceberg.staging-schema",
+        "AXELOR_LAKEHOUSE_ICEBERG_STAGING_SCHEMA",
+        "lake_staging");
+  }
+
+  private String getIcebergAnalyticsSchema() {
+    return getSetting(
+        "axelor.lakehouse.iceberg.analytics-schema",
+        "AXELOR_LAKEHOUSE_ICEBERG_ANALYTICS_SCHEMA",
+        "lake_analytics");
+  }
+
+  private String getIcebergS3Region() {
+    return getSetting(
+        "axelor.lakehouse.iceberg.s3-region", "AXELOR_LAKEHOUSE_ICEBERG_S3_REGION", "us-east-1");
+  }
+
+  private String getJenkinsUrl() {
+    return getSetting("axelor.lakehouse.jenkins.url", "JENKINS_URL", "http://localhost:8080");
+  }
+
+  private String getJenkinsJobUrl() {
+    String configuredValue = getSetting("axelor.lakehouse.jenkins.job-url", "JENKINS_JOB_URL", "");
+    if (configuredValue != null && !configuredValue.isBlank()) {
+      return configuredValue;
+    }
+    return getJenkinsUrl() + "/job/open-suite-lake-pipeline";
+  }
+
+  private String getJenkinsUser() {
+    return getSetting("axelor.lakehouse.jenkins.user", "JENKINS_USER", "");
+  }
+
+  private String getJenkinsApiToken() {
+    return getSetting("axelor.lakehouse.jenkins.api-token", "JENKINS_API_TOKEN", "");
+  }
+
+  private String getJenkinsBuildToken() {
+    return getSetting("axelor.lakehouse.jenkins.build-token", "JENKINS_BUILD_TOKEN", "");
+  }
+
+  private long getJenkinsWaitTimeoutSeconds() {
+    return Long.parseLong(
+        getSetting(
+            "axelor.lakehouse.jenkins.wait-timeout-seconds",
+            "JENKINS_WAIT_TIMEOUT_SECONDS",
+            "600"));
+  }
+
+  private long getJenkinsPollIntervalMillis() {
+    double seconds =
+        Double.parseDouble(
+            getSetting(
+                "axelor.lakehouse.jenkins.poll-interval-seconds",
+                "JENKINS_POLL_INTERVAL_SECONDS",
+                "2"));
+    return Math.max(500L, (long) (seconds * 1000));
   }
 
   private String getPgDuckDbJdbcUrl() {
-    return System.getProperty(
+    return getSetting(
         "axelor.lakehouse.pgduckdb.jdbc-url",
-        System.getenv()
-            .getOrDefault(
-                "AXELOR_LAKEHOUSE_PGDUCKDB_JDBC_URL",
-                "jdbc:postgresql://localhost:5433/analytics"));
+        "AXELOR_LAKEHOUSE_PGDUCKDB_JDBC_URL",
+        "jdbc:postgresql://localhost:5433/analytics");
   }
 
   private String getPgDuckDbUsername() {
-    return System.getProperty(
-        "axelor.lakehouse.pgduckdb.username",
-        System.getenv().getOrDefault("AXELOR_LAKEHOUSE_PGDUCKDB_USERNAME", "postgres"));
+    return getSetting(
+        "axelor.lakehouse.pgduckdb.username", "AXELOR_LAKEHOUSE_PGDUCKDB_USERNAME", "postgres");
   }
 
   private String getPgDuckDbPassword() {
-    return System.getProperty(
-        "axelor.lakehouse.pgduckdb.password",
-        System.getenv().getOrDefault("AXELOR_LAKEHOUSE_PGDUCKDB_PASSWORD", "duckdb"));
+    return getSetting(
+        "axelor.lakehouse.pgduckdb.password", "AXELOR_LAKEHOUSE_PGDUCKDB_PASSWORD", "duckdb");
+  }
+
+  private String getSetting(String propertyKey, String envKey, String defaultValue) {
+    String systemValue = System.getProperty(propertyKey);
+    if (systemValue != null) {
+      String trimmed = systemValue.trim();
+      if (!trimmed.isBlank()) {
+        return trimmed;
+      }
+    }
+
+    try {
+      String appValue = AppSettings.get().get(propertyKey);
+      if (appValue != null) {
+        String trimmed = appValue.trim();
+        if (!trimmed.isBlank()) {
+          return trimmed;
+        }
+      }
+    } catch (Exception ignored) {
+      // Ignore settings bootstrap issues and continue to env/default fallback.
+    }
+
+    String envValue = System.getenv(envKey);
+    if (envValue != null) {
+      String trimmed = envValue.trim();
+      if (!trimmed.isBlank()) {
+        return trimmed;
+      }
+    }
+    return defaultValue;
+  }
+
+  private String describeSettingSource(String propertyKey, String envKey) {
+    String systemValue = System.getProperty(propertyKey);
+    if (systemValue != null && !systemValue.trim().isBlank()) {
+      return "system";
+    }
+
+    try {
+      String appValue = AppSettings.get().get(propertyKey);
+      if (appValue != null && !appValue.trim().isBlank()) {
+        return "app";
+      }
+    } catch (Exception ignored) {
+      // Ignore settings bootstrap issues and continue to env/default fallback.
+    }
+
+    String envValue = System.getenv(envKey);
+    if (envValue != null && !envValue.trim().isBlank()) {
+      return "env";
+    }
+    return "default";
+  }
+
+  private String fingerprintSecret(String value) {
+    if (value == null) {
+      return "<null>";
+    }
+    String trimmed = value.trim();
+    if (trimmed.isBlank()) {
+      return "<blank>";
+    }
+    int length = trimmed.length();
+    String suffix = trimmed.substring(Math.max(0, length - 4));
+    return "len=" + length + ",suffix=" + suffix;
   }
 }

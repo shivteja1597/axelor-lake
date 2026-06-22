@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<domain-models xmlns="http://axelor.com/xml/ns/domain-models"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://axelor.com/xml/ns/domain-models
+  https://axelor.com/xml/ns/domain-models/domain-models_8.1.xsd">
+
+  <module name="lake" package="com.axelor.lake.db"/>
+
+  <entity name="LakeCustomerPrediction">
+    <string name="accountId" required="true"/>
+    <string name="siteId"/>
+    <string name="customerName" required="true" namecolumn="true"/>
+    <string name="state"/>
+    <string name="contractStatus"/>
+    <string name="planType"/>
+    <decimal name="currentRmr" precision="20" scale="2"/>
+    <string name="customerSegmentBucket"/>
+    <decimal name="churnRiskPercentage" precision="20" scale="2"/>
+    <string name="riskSegment"/>
+  </entity>
+
+</domain-models>

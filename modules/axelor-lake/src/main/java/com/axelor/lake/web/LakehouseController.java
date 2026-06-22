@@ -44,6 +44,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -59,6 +60,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -99,6 +101,7 @@ public class LakehouseController {
   private static final int ANALYSIS_PAGE_SIZE = 100;
   private static final int ANALYSIS_MAX_PAGE_SIZE = 200;
   private static final String CUSTOMER_UPLOAD_TABLE_NAME = "customer_profile";
+  private static final long AGENT_TIMEOUT_SECONDS = 90L;
   private static final Map<String, String> CUSTOMER_SCHEMA_ALIASES =
       Map.of("address_line2", "address_line_2");
   private static final Set<String> CUSTOMER_SCHEMA_COLUMNS =
@@ -178,8 +181,7 @@ public class LakehouseController {
       LakehouseTable table =
           Beans.get(LakehouseService.class)
               .uploadToLakehouse(
-                  normalizedCustomerCsvPath.toFile(), CUSTOMER_UPLOAD_TABLE_NAME, false);
-      Beans.get(LakehouseService.class).runCustomerRiskWorkflow(CUSTOMER_UPLOAD_TABLE_NAME);
+                  normalizedCustomerCsvPath.toFile(), CUSTOMER_UPLOAD_TABLE_NAME, true);
 
       response.setInfo(
           I18n.get(
@@ -467,91 +469,148 @@ public class LakehouseController {
   }
 
   public void loadCustomerPredictionSummary(ActionRequest request, ActionResponse response) {
-    try (Connection connection =
-            DriverManager.getConnection(
-                getPgDuckDbJdbcUrl(), getPgDuckDbUsername(), getPgDuckDbPassword());
-        PreparedStatement preparedStatement =
-            connection.prepareStatement(
-                """
+    try {
+      Object[] row =
+          (Object[])
+              JPA.em()
+                  .createQuery(
+                      """
                 SELECT
-                  COUNT(*) AS total_customers,
-                  COUNT(*) FILTER (WHERE CAST(e['contract_status'] AS text) = 'Active') AS active_customers,
-                  COUNT(*) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'High Risk') AS high_risk_customers,
-                  COUNT(*) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'Medium Risk') AS medium_risk_customers,
-                  COUNT(*) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'Low Risk') AS low_risk_customers,
-                  ROUND(AVG(CAST(e['churn_risk_percentage'] AS numeric)), 2) AS predicted_churn_percentage,
-                  ROUND(AVG(CAST(e['churn_risk_percentage'] AS numeric)) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'High Risk'), 2) AS high_risk_churn_percentage,
-                  ROUND(AVG(CAST(e['churn_risk_percentage'] AS numeric)) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'Medium Risk'), 2) AS medium_risk_churn_percentage,
-                  ROUND(AVG(CAST(e['churn_risk_percentage'] AS numeric)) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'Low Risk'), 2) AS low_risk_churn_percentage
-                FROM duckdb.query('SELECT * FROM read_parquet(''%s'')') e
-                """
-                    .formatted(escapeSqlLiteral(getParquetFile("customer_predictions"))))) {
-      try (ResultSet resultSet = preparedStatement.executeQuery()) {
-        if (!resultSet.next()) {
-          response.setData(List.of());
-          return;
-        }
+                  COUNT(self),
+                  SUM(CASE WHEN LOWER(COALESCE(self.contractStatus, '')) = 'active' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN self.riskSegment = 'High Risk' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN self.riskSegment = 'Medium Risk' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN self.riskSegment = 'Low Risk' THEN 1 ELSE 0 END),
+                  AVG(self.churnRiskPercentage),
+                  AVG(CASE WHEN self.riskSegment = 'High Risk' THEN self.churnRiskPercentage ELSE NULL END),
+                  AVG(CASE WHEN self.riskSegment = 'Medium Risk' THEN self.churnRiskPercentage ELSE NULL END),
+                  AVG(CASE WHEN self.riskSegment = 'Low Risk' THEN self.churnRiskPercentage ELSE NULL END)
+                FROM LakeCustomerPrediction self
+                """)
+                  .getSingleResult();
 
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("total_customers", resultSet.getLong("total_customers"));
-        summary.put("active_customers", resultSet.getLong("active_customers"));
-        summary.put("high_risk_customers", resultSet.getLong("high_risk_customers"));
-        summary.put("medium_risk_customers", resultSet.getLong("medium_risk_customers"));
-        summary.put("low_risk_customers", resultSet.getLong("low_risk_customers"));
-        summary.put(
-            "predicted_churn_percentage",
-            getNullableDouble(resultSet, "predicted_churn_percentage"));
-        summary.put(
-            "high_risk_churn_percentage",
-            getNullableDouble(resultSet, "high_risk_churn_percentage"));
-        summary.put(
-            "medium_risk_churn_percentage",
-            getNullableDouble(resultSet, "medium_risk_churn_percentage"));
-        summary.put(
-            "low_risk_churn_percentage", getNullableDouble(resultSet, "low_risk_churn_percentage"));
-        response.setData(List.of(summary));
-      }
+      Map<String, Object> summary = new LinkedHashMap<>();
+      summary.put("total_customers", toLong(row[0]));
+      summary.put("active_customers", toLong(row[1]));
+      summary.put("high_risk_customers", toLong(row[2]));
+      summary.put("medium_risk_customers", toLong(row[3]));
+      summary.put("low_risk_customers", toLong(row[4]));
+      summary.put("predicted_churn_percentage", toDouble(row[5]));
+      summary.put("high_risk_churn_percentage", toDouble(row[6]));
+      summary.put("medium_risk_churn_percentage", toDouble(row[7]));
+      summary.put("low_risk_churn_percentage", toDouble(row[8]));
+      response.setData(List.of(summary));
     } catch (Exception e) {
       TraceBackService.trace(response, e);
     }
   }
 
+  public void askLakeAgent(ActionRequest request, ActionResponse response) {
+    Map<String, Object> context = request.getContext();
+    String question = getAgentQuestion(context);
+    if (question == null || question.isBlank() || "null".equals(question)) {
+      response.setError(I18n.get("Please enter a question for the AI agent."));
+      return;
+    }
+
+    try {
+      String answer = runLakeAgent(question.trim());
+      response.setValue("$agentAnswer", answer);
+      response.setValue("agentAnswer", answer);
+    } catch (Exception e) {
+      LOG.error("Lakehouse AI agent request failed", e);
+      response.setError(I18n.get(e.getMessage()));
+    }
+  }
+
   public void loadCustomerSegmentRiskMatrix(ActionRequest request, ActionResponse response) {
-    try (Connection connection =
-            DriverManager.getConnection(
-                getPgDuckDbJdbcUrl(), getPgDuckDbUsername(), getPgDuckDbPassword());
-        PreparedStatement preparedStatement =
-            connection.prepareStatement(
-                """
+    try {
+      List<Object[]> results =
+          JPA.em()
+              .createQuery(
+                  """
                 SELECT
-                  COALESCE(NULLIF(TRIM(CAST(e['customer_segment_bucket'] AS text)), ''), 'Unknown Segment')
-                    AS customer_segment_bucket,
-                  COUNT(*) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'High Risk')
-                    AS high_risk_count,
-                  COUNT(*) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'Medium Risk')
-                    AS medium_risk_count,
-                  COUNT(*) FILTER (WHERE CAST(e['risk_segment'] AS text) = 'Low Risk')
-                    AS low_risk_count
-                FROM duckdb.query('SELECT * FROM read_parquet(''%s'')') e
-                GROUP BY 1
-                ORDER BY 1
-                """
-                    .formatted(escapeSqlLiteral(getParquetFile("customer_predictions"))))) {
-      try (ResultSet resultSet = preparedStatement.executeQuery()) {
-        List<Map<String, Object>> rows = new ArrayList<>();
-        while (resultSet.next()) {
-          Map<String, Object> row = new LinkedHashMap<>();
-          row.put("customer_segment_bucket", resultSet.getString("customer_segment_bucket"));
-          row.put("high_risk_count", resultSet.getLong("high_risk_count"));
-          row.put("medium_risk_count", resultSet.getLong("medium_risk_count"));
-          row.put("low_risk_count", resultSet.getLong("low_risk_count"));
-          rows.add(row);
-        }
-        response.setData(rows);
+                  COALESCE(NULLIF(TRIM(self.customerSegmentBucket), ''), 'Unknown Segment'),
+                  SUM(CASE WHEN self.riskSegment = 'High Risk' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN self.riskSegment = 'Medium Risk' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN self.riskSegment = 'Low Risk' THEN 1 ELSE 0 END)
+                FROM LakeCustomerPrediction self
+                GROUP BY COALESCE(NULLIF(TRIM(self.customerSegmentBucket), ''), 'Unknown Segment')
+                ORDER BY COALESCE(NULLIF(TRIM(self.customerSegmentBucket), ''), 'Unknown Segment')
+                """)
+              .getResultList();
+
+      List<Map<String, Object>> rows = new ArrayList<>();
+      for (Object[] result : results) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("customer_segment_bucket", result[0]);
+        row.put("high_risk_count", toLong(result[1]));
+        row.put("medium_risk_count", toLong(result[2]));
+        row.put("low_risk_count", toLong(result[3]));
+        rows.add(row);
       }
+      response.setData(rows);
     } catch (Exception e) {
       TraceBackService.trace(response, e);
     }
+  }
+
+  public void loadCustomerPredictionsDb(ActionRequest request, ActionResponse response) {
+    try {
+      Map<String, Object> filters = extractFilters(request);
+      Integer pageValue = getInteger(filters, "customerPage");
+      Integer pageSizeValue = getInteger(filters, "customerPageSize");
+
+      long totalRows =
+          ((Number)
+                  JPA.em()
+                      .createQuery("SELECT COUNT(self) FROM LakeCustomerPrediction self")
+                      .getSingleResult())
+              .longValue();
+      int pageSize = normalizePageSize(pageSizeValue);
+      int totalPages = Math.max(1, (int) Math.ceil((double) totalRows / pageSize));
+      int page = normalizePage(pageValue, totalPages);
+
+      @SuppressWarnings("unchecked")
+      List<com.axelor.lake.db.LakeCustomerPrediction> predictions =
+          JPA.em()
+              .createQuery(
+                  "SELECT self FROM LakeCustomerPrediction self ORDER BY self.accountId ASC",
+                  com.axelor.lake.db.LakeCustomerPrediction.class)
+              .setFirstResult((page - 1) * pageSize)
+              .setMaxResults(pageSize)
+              .getResultList();
+
+      List<Map<String, Object>> rows = new ArrayList<>();
+      for (com.axelor.lake.db.LakeCustomerPrediction prediction : predictions) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("account_id", prediction.getAccountId());
+        row.put("site_id", prediction.getSiteId());
+        row.put("customer_name", prediction.getCustomerName());
+        row.put("state", prediction.getState());
+        row.put("contract_status", prediction.getContractStatus());
+        row.put("plan_type", prediction.getPlanType());
+        row.put("current_rmr", prediction.getCurrentRmr());
+        row.put("churn_risk_percentage", prediction.getChurnRiskPercentage());
+        row.put("risk_segment", prediction.getRiskSegment());
+        row.put("_page", page);
+        row.put("_totalRows", totalRows);
+        row.put("_totalPages", totalPages);
+        row.put("_reportName", "customer_predictions");
+        rows.add(row);
+      }
+      response.setData(rows);
+    } catch (Exception e) {
+      TraceBackService.trace(response, e);
+    }
+  }
+
+  public void loadCustomerPredictionSummaryDb(ActionRequest request, ActionResponse response) {
+    loadCustomerPredictionSummary(request, response);
+  }
+
+  public void loadCustomerSegmentRiskMatrixDb(ActionRequest request, ActionResponse response) {
+    loadCustomerSegmentRiskMatrix(request, response);
   }
 
   private boolean hasProfilingDataAvailable() {
@@ -1363,5 +1422,69 @@ public class LakehouseController {
       return BigDecimal.valueOf(number.doubleValue());
     }
     return new BigDecimal(String.valueOf(value).trim());
+  }
+
+  private String runLakeAgent(String question) throws IOException, InterruptedException {
+    Path projectRoot = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
+    Path agentDir = projectRoot.resolve("ai-agent");
+    Path scriptPath = agentDir.resolve("ask.py");
+    Path pythonPath = getLakeAgentPythonPath(agentDir);
+
+    Process process =
+        new ProcessBuilder(pythonPath.toString(), scriptPath.toString(), question)
+            .directory(agentDir.toFile())
+            .redirectErrorStream(true)
+            .start();
+
+    boolean completed = process.waitFor(AGENT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    if (!completed) {
+      process.destroyForcibly();
+      throw new IllegalStateException("AI agent timed out. Please try a smaller question.");
+    }
+    if (process.exitValue() != 0) {
+      throw new IllegalStateException(normalizeAgentOutput(output));
+    }
+    return normalizeAgentOutput(output);
+  }
+
+  private String getAgentQuestion(Map<String, Object> context) {
+    if (context == null) {
+      return null;
+    }
+
+    for (String key : List.of("$agentQuestion", "agentQuestion")) {
+      Object value = context.get(key);
+      if (value != null && !String.valueOf(value).isBlank()) {
+        return String.valueOf(value);
+      }
+    }
+    return null;
+  }
+
+  private Path getLakeAgentPythonPath(Path agentDir) {
+    String configuredPython = System.getenv("AXELOR_LAKE_AGENT_PYTHON");
+    if (configuredPython != null && !configuredPython.isBlank()) {
+      return Paths.get(configuredPython.trim()).toAbsolutePath();
+    }
+
+    Path windowsPython = agentDir.resolve(".venv").resolve("Scripts").resolve("python.exe");
+    if (Files.exists(windowsPython)) {
+      return windowsPython;
+    }
+    return agentDir.resolve(".venv").resolve("bin").resolve("python");
+  }
+
+  private String normalizeAgentOutput(String output) {
+    String normalized = output == null ? "" : output.trim();
+    return normalized.isBlank() ? "AI agent returned no response." : normalized;
+  }
+
+  private long toLong(Object value) {
+    return value == null ? 0L : ((Number) value).longValue();
+  }
+
+  private Double toDouble(Object value) {
+    return value == null ? null : ((Number) value).doubleValue();
   }
 }

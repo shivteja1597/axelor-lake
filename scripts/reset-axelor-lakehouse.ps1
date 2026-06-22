@@ -4,8 +4,7 @@ param(
   [string]$DbName = "axelor4",
   [string]$DbUser = "postgres",
   [string]$DbPassword = "root",
-  [string]$AdminDb = "postgres",
-  [string]$LakehouseApiBaseUrl = "http://localhost:8000"
+  [string]$AdminDb = "postgres"
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,9 +44,5 @@ cur.close()
 conn.close()
 print("database reset complete")
 "@ | python -
-
-Write-Host "Purging MinIO lakehouse buckets via $LakehouseApiBaseUrl/admin/purge-storage ..."
-$purgeResponse = Invoke-RestMethod -Method Post -Uri "$LakehouseApiBaseUrl/admin/purge-storage"
-$purgeResponse | ConvertTo-Json -Depth 5
 
 Write-Host "Reset complete."

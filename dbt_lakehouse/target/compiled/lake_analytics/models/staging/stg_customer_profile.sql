@@ -1,8 +1,6 @@
-
-
 with raw_source as (
     select *
-    from read_parquet('s3://lake-staging/my_data/customer_profile_d9450102-d47b-4f73-8608-8875ffcb9674/data/*.parquet')
+    from read_csv_auto('s3://lake-raw/customer_profile/*.csv', header=true, sample_size=-1)
 )
 
 select

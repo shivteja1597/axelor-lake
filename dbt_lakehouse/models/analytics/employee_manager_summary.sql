@@ -1,9 +1,4 @@
 -- Manager summary by department
-{{ config(
-    materialized='external',
-    location='s3://lake-analytics/employee_manager_summary.parquet'
-) }}
-
 with curated as (
     select * from {{ ref('dim_employee') }}
 )

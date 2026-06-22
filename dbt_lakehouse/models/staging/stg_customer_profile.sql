@@ -1,8 +1,6 @@
-{{ config(materialized='view') }}
-
 with raw_source as (
     select *
-    from read_parquet('{{ env_var("CUSTOMER_PROFILE_DATA_GLOB", "s3://lake-staging/my_data/customer_profile_*/data/*.parquet") }}')
+    from read_csv_auto('{{ env_var("CUSTOMER_PROFILE_DATA_GLOB", "s3://lake-raw/customer_profile/*.csv") }}', header=true, sample_size=-1)
 )
 
 select

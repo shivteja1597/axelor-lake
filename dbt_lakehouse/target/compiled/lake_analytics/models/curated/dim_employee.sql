@@ -1,6 +1,4 @@
 -- Curated employee master with nulls filtered
-
-
 with staging as (
     select * from "memory"."main"."stg_employee"
 )

@@ -1,7 +1,13 @@
+create table "iceberg_lake"."lake_analytics"."employee_role_summary" as (
+      -- Role-level aggregation
+with curated as (
+    select * from "iceberg_lake"."lake_curated"."dim_employee"
+)
 
-      create or replace view "memory"."main"."employee_role_summary__dbt_int" as (
-        select * from read_parquet('s3://lake-analytics/employee_role_summary.parquet', union_by_name=False)
-        -- if relation is empty, filter by all columns having null values
-        
-      );
-    
+select
+    role,
+    count(*) as employee_count,
+    avg(salary) as average_salary
+from curated
+group by role
+    );

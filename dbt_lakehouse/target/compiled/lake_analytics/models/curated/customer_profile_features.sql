@@ -1,5 +1,3 @@
-
-
 with staging as (
     select * from "memory"."main"."stg_customer_profile"
 ),

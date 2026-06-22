@@ -14,11 +14,24 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+on-run-start:
+  - "INSTALL httpfs; LOAD httpfs;"
+  - "INSTALL iceberg; LOAD iceberg;"
+  - "CREATE SCHEMA IF NOT EXISTS {{ env_var('ICEBERG_CATALOG_ALIAS', 'iceberg_lake') }}.lake_staging;"
+  - "CREATE SCHEMA IF NOT EXISTS {{ env_var('ICEBERG_CATALOG_ALIAS', 'iceberg_lake') }}.lake_curated;"
+  - "CREATE SCHEMA IF NOT EXISTS {{ env_var('ICEBERG_CATALOG_ALIAS', 'iceberg_lake') }}.lake_analytics;"
+
 models:
   lake_analytics:
     staging:
       +materialized: view
+      +database: memory
+      +schema: main
     curated:
       +materialized: table
+      +database: "{{ env_var('ICEBERG_CATALOG_ALIAS', 'iceberg_lake') }}"
+      +schema: lake_curated
     analytics:
       +materialized: table
+      +database: "{{ env_var('ICEBERG_CATALOG_ALIAS', 'iceberg_lake') }}"
+      +schema: lake_analytics

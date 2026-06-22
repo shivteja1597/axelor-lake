@@ -4,13 +4,30 @@ lake_analytics:
     dev:
       type: duckdb
       path: ':memory:'
+      database: "{{ env_var('ICEBERG_CATALOG_ALIAS', 'iceberg_lake') }}"
       extensions:
         - httpfs
         - iceberg
+      secrets:
+        - type: s3
+          name: minio_secret
+          key_id: "{{ env_var('MINIO_ACCESS_KEY', 'admin') }}"
+          secret: "{{ env_var('MINIO_SECRET_KEY', 'password123') }}"
+          region: "{{ env_var('MINIO_REGION', 'us-east-1') }}"
+          endpoint: "{{ env_var('MINIO_ENDPOINT_HOSTPORT', 'minio:9000') }}"
+          use_ssl: "false"
+          url_style: "path"
+      attach:
+        - path: "{{ env_var('ICEBERG_WAREHOUSE', 'warehouse') }}"
+          alias: "{{ env_var('ICEBERG_CATALOG_ALIAS', 'iceberg_lake') }}"
+          type: iceberg
+          options:
+            endpoint: "{{ env_var('ICEBERG_REST_URI', 'http://nessie:19120/iceberg') }}"
+            authorization_type: none
       settings:
-        s3_endpoint: "minio:9000"
-        s3_access_key_id: "admin"
-        s3_secret_access_key: "password123"
+        s3_endpoint: "{{ env_var('MINIO_ENDPOINT_HOSTPORT', 'minio:9000') }}"
+        s3_access_key_id: "{{ env_var('MINIO_ACCESS_KEY', 'admin') }}"
+        s3_secret_access_key: "{{ env_var('MINIO_SECRET_KEY', 'password123') }}"
+        s3_region: "{{ env_var('MINIO_REGION', 'us-east-1') }}"
         s3_use_ssl: "false"
         s3_url_style: "path"
-        unsafe_enable_version_guessing: "true"

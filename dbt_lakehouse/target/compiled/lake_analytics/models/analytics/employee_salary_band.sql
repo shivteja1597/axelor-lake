@@ -1,8 +1,6 @@
 -- Salary band classification
-
-
 with curated as (
-    select * from "memory"."main"."dim_employee"
+    select * from "iceberg_lake"."lake_curated"."dim_employee"
 )
 
 select

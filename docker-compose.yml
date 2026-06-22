@@ -98,36 +98,6 @@ services:
     networks:
       - lakehouse
 
-  lakehouse-api:
-    build:
-      context: ./lakehouse-api
-    container_name: lakehouse-api
-    environment:
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: admin
-      MINIO_SECRET_KEY: password123
-      MINIO_BUCKET: lake-staging
-      MINIO_ANALYTICS_BUCKET: lake-analytics
-      MINIO_MODELS_BUCKET: lake-models
-      ICEBERG_NAMESPACE: my_data
-      CATALOG_URI: http://nessie:19120/iceberg/main
-      PGDUCKDB_DSN: host=pgduckdb port=5432 dbname=analytics user=postgres password=duckdb
-      JENKINS_URL: http://jenkins:8080
-      JENKINS_JOB_URL: http://jenkins:8080/job/open-suite-lake-pipeline
-      JENKINS_USER: "admin"
-      JENKINS_API_TOKEN: "11e64f72fa7b664e82c265937d2c68b9c7"
-      JENKINS_BUILD_TOKEN: ""
-      JENKINS_WAIT_TIMEOUT_SECONDS: "600"
-    ports:
-      - "8000:8000"
-    depends_on:
-      - pgduckdb
-      - minio
-      - minio-init
-      - nessie
-    networks:
-      - lakehouse
-
 networks:
   lakehouse:
     driver: bridge

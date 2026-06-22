@@ -59,7 +59,7 @@
     <field name="_totalPages" type="integer"/>
     <field name="_reportName" type="string"/>
     <dataset type="rpc"><![CDATA[
-      com.axelor.lake.web.LakehouseController:loadCustomerPredictions
+      com.axelor.lake.web.LakehouseController:loadCustomerPredictionsDb
     ]]></dataset>
     <template><![CDATA[
       <div class='report-data' style='width:100%; overflow-x:auto; padding:10px;'>
@@ -87,7 +87,7 @@
       type="decimal"/>
     <field name="low_risk_churn_percentage" title="Low risk churn percentage" type="decimal"/>
     <dataset type="rpc"><![CDATA[
-      com.axelor.lake.web.LakehouseController:loadCustomerPredictionSummary
+      com.axelor.lake.web.LakehouseController:loadCustomerPredictionSummaryDb
     ]]></dataset>
     <template><![CDATA[
       <div class='report-data' style='width:100%; padding:10px 12px 18px;'>
@@ -139,7 +139,7 @@
     <field name="medium_risk_count" title="Medium Risk" type="integer"/>
     <field name="low_risk_count" title="Low Risk" type="integer"/>
     <dataset type="rpc"><![CDATA[
-      com.axelor.lake.web.LakehouseController:loadCustomerSegmentRiskMatrix
+      com.axelor.lake.web.LakehouseController:loadCustomerSegmentRiskMatrixDb
     ]]></dataset>
     <template><![CDATA[
       <div class='report-data' style='width:100%; padding:10px 12px 18px; overflow-x:auto;'>

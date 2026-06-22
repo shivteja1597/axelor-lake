@@ -1,9 +1,4 @@
 -- Salary band classification
-{{ config(
-    materialized='external',
-    location='s3://lake-analytics/employee_salary_band.parquet'
-) }}
-
 with curated as (
     select * from {{ ref('dim_employee') }}
 )

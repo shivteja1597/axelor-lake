@@ -171,7 +171,7 @@
       title="Prediction Summary" colSpan="12" height="390"
       action="dashlet.lake.customer.predictions.summary"/>
     <panel-dashlet name="lakeCustomerSegmentRiskMatrixPanel"
-      title="Customer Groups by Risk" colSpan="12" height="320"
+      title="Customer Segmentation" colSpan="12" height="320"
       action="dashlet.lake.customer.segment.risk.matrix"/>
     <panel-dashlet name="lakeCustomerPredictionPanel" title="Prediction Table"
       colSpan="12" height="420" action="dashlet.lake.customer.predictions.table"/>
@@ -244,7 +244,7 @@
   </action-view>
 
   <action-view name="dashlet.lake.customer.segment.risk.matrix"
-    title="Customer Groups by Risk">
+    title="Customer Segmentation">
     <view type="custom" name="custom.lake.customer.segment.risk.matrix"/>
   </action-view>
 

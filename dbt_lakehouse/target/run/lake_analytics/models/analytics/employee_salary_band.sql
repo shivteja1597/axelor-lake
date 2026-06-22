@@ -1,7 +1,19 @@
+create table "iceberg_lake"."lake_analytics"."employee_salary_band" as (
+      -- Salary band classification
+with curated as (
+    select * from "iceberg_lake"."lake_curated"."dim_employee"
+)
 
-      create or replace view "memory"."main"."employee_salary_band__dbt_int" as (
-        select * from read_parquet('s3://lake-analytics/employee_salary_band.parquet', union_by_name=False)
-        -- if relation is empty, filter by all columns having null values
-        
-      );
-    
+select
+    employee_id,
+    name,
+    department,
+    role,
+    salary,
+    case
+        when salary < 40000 then 'Low'
+        when salary between 40000 and 80000 then 'Medium'
+        else 'High'
+    end as salary_band
+from curated
+    );

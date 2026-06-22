@@ -1,8 +1,6 @@
 import os
 import sys
 import tempfile
-import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
@@ -22,9 +20,11 @@ MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 MINIO_CURATED_BUCKET = os.getenv("MINIO_CURATED_BUCKET", "lake-curated")
 MINIO_ANALYTICS_BUCKET = os.getenv("MINIO_ANALYTICS_BUCKET", "lake-analytics")
 MINIO_MODELS_BUCKET = os.getenv("MINIO_MODELS_BUCKET", "lake-models")
-FEATURE_OBJECT = os.getenv(
-    "CUSTOMER_FEATURE_OBJECT", f"s3://{MINIO_CURATED_BUCKET}/customer_profile_features.parquet"
-)
+ICEBERG_REST_URI = os.getenv("ICEBERG_REST_URI", "http://nessie:19120/iceberg/main")
+ICEBERG_WAREHOUSE = os.getenv("ICEBERG_WAREHOUSE", "warehouse")
+ICEBERG_CATALOG_ALIAS = os.getenv("ICEBERG_CATALOG_ALIAS", "iceberg_lake")
+ICEBERG_CURATED_SCHEMA = os.getenv("ICEBERG_CURATED_SCHEMA", "lake_curated")
+CUSTOMER_FEATURE_TABLE = os.getenv("CUSTOMER_FEATURE_TABLE", "customer_profile_features")
 PREDICTIONS_OBJECT = os.getenv(
     "CUSTOMER_PREDICTIONS_OBJECT", f"s3://{MINIO_ANALYTICS_BUCKET}/customer_predictions.parquet"
 )
@@ -74,6 +74,8 @@ TARGET_MAPPING = {"active": 0, "cancelled": 1}
 def configure_connection(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute("INSTALL httpfs;")
     connection.execute("LOAD httpfs;")
+    connection.execute("INSTALL iceberg;")
+    connection.execute("LOAD iceberg;")
     endpoint = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
     connection.execute(f"SET s3_endpoint='{endpoint}';")
     connection.execute(f"SET s3_access_key_id='{MINIO_ACCESS_KEY}';")
@@ -81,10 +83,30 @@ def configure_connection(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(f"SET s3_region='{MINIO_REGION}';")
     connection.execute("SET s3_use_ssl=false;")
     connection.execute("SET s3_url_style='path';")
+    connection.execute(
+        f"""
+        CREATE OR REPLACE SECRET minio_secret (
+            TYPE S3,
+            KEY_ID '{MINIO_ACCESS_KEY}',
+            SECRET '{MINIO_SECRET_KEY}',
+            REGION '{MINIO_REGION}',
+            ENDPOINT '{endpoint}',
+            USE_SSL false,
+            URL_STYLE 'path'
+        )
+        """
+    )
+    connection.execute(
+        f"""
+        ATTACH '{ICEBERG_WAREHOUSE}' AS {ICEBERG_CATALOG_ALIAS}
+        (TYPE iceberg, ENDPOINT '{ICEBERG_REST_URI}', AUTHORIZATION_TYPE 'none')
+        """
+    )
 
 
 def load_feature_data(connection: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    return connection.execute(f"SELECT * FROM read_parquet('{FEATURE_OBJECT}')").fetchdf()
+    table_ref = f"{ICEBERG_CATALOG_ALIAS}.{ICEBERG_CURATED_SCHEMA}.{CUSTOMER_FEATURE_TABLE}"
+    return connection.execute(f"SELECT * FROM {table_ref}").fetchdf()
 
 
 def prepare_training_frame(

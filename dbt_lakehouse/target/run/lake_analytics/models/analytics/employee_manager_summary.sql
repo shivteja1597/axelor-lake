@@ -1,7 +1,14 @@
+create table "iceberg_lake"."lake_analytics"."employee_manager_summary" as (
+      -- Manager summary by department
+with curated as (
+    select * from "iceberg_lake"."lake_curated"."dim_employee"
+)
 
-      create or replace view "memory"."main"."employee_manager_summary__dbt_int" as (
-        select * from read_parquet('s3://lake-analytics/employee_manager_summary.parquet', union_by_name=False)
-        -- if relation is empty, filter by all columns having null values
-        
-      );
-    
+select
+    department,
+    role,
+    name as manager_name,
+    count(*) over (partition by department) as dept_manager_count
+from curated
+where lower(role) like '%manager%'
+    );

@@ -1,8 +1,3 @@
-{{ config(
-    materialized='external',
-    location='s3://lake-curated/customer_profile_features.parquet'
-) }}
-
 with staging as (
     select * from {{ ref('stg_customer_profile') }}
 ),
