@@ -266,9 +266,9 @@ def build_predictions_frame(
         # Sort by impact
         sorted_impacts = sorted(feature_impacts, key=lambda x: x[1], reverse=True)
         
-        # Extract top 3 positive (risk increasing) and top 3 negative (risk decreasing)
-        positives = [f"{feat} (+{val:.2f})" for feat, val in sorted_impacts if val > 0][:3]
-        negatives = [f"{feat} ({val:.2f})" for feat, val in sorted_impacts[::-1] if val < 0][:3]
+        # Extract all positive (risk increasing) and all negative (risk decreasing) features
+        positives = [f"{feat} (+{val:.2f}%)" for feat, val in sorted_impacts if val > 0]
+        negatives = [f"{feat} ({val:.2f}%)" for feat, val in sorted_impacts[::-1] if val < 0]
         
         positive_drivers_list.append("\\n".join(positives) if positives else "None")
         negative_drivers_list.append("\\n".join(negatives) if negatives else "None")
