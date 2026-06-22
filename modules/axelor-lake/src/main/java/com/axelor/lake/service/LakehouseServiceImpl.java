@@ -516,6 +516,9 @@ public class LakehouseServiceImpl implements LakehouseService {
         prediction.setChurnRiskPercentage(
             getOptionalDecimalValue(resultSet, columnIndexes, "churn_risk_percentage"));
         prediction.setRiskSegment(getOptionalRowValue(resultSet, columnIndexes, "risk_segment"));
+        prediction.setBaseRisk(getOptionalDecimalValue(resultSet, columnIndexes, "base_risk"));
+        prediction.setPositiveRiskDrivers(getOptionalRowValue(resultSet, columnIndexes, "positive_risk_drivers"));
+        prediction.setNegativeRiskDrivers(getOptionalRowValue(resultSet, columnIndexes, "negative_risk_drivers"));
         predictions.add(prediction);
 
         if (scannedRowCount % PREDICTION_SYNC_BATCH_SIZE == 0) {
@@ -625,8 +628,8 @@ public class LakehouseServiceImpl implements LakehouseService {
                   connection.prepareStatement(
                       "INSERT INTO lake_lake_customer_prediction "
                           + "(id, version, account_id, site_id, customer_name, state, contract_status, "
-                          + "plan_type, current_rmr, customer_segment_bucket, churn_risk_percentage, risk_segment) "
-                          + "VALUES (nextval('lake_lake_customer_prediction_seq'), 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                          + "plan_type, current_rmr, customer_segment_bucket, churn_risk_percentage, risk_segment, base_risk, positive_risk_drivers, negative_risk_drivers) "
+                          + "VALUES (nextval('lake_lake_customer_prediction_seq'), 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
                 int batchSize = 0;
                 for (LakeCustomerPrediction prediction : predictions) {
                   statement.setString(1, prediction.getAccountId());
@@ -639,6 +642,9 @@ public class LakehouseServiceImpl implements LakehouseService {
                   statement.setString(8, prediction.getCustomerSegmentBucket());
                   statement.setBigDecimal(9, prediction.getChurnRiskPercentage());
                   statement.setString(10, prediction.getRiskSegment());
+                  statement.setBigDecimal(11, prediction.getBaseRisk());
+                  statement.setString(12, prediction.getPositiveRiskDrivers());
+                  statement.setString(13, prediction.getNegativeRiskDrivers());
                   statement.addBatch();
                   batchSize++;
 
