@@ -7,7 +7,7 @@
   <grid name="lake-customer-prediction-grid" title="Customer Predictions"
     model="com.axelor.lake.db.LakeCustomerPrediction"
     canNew="false" canEdit="false" canDelete="false" edit-icon="false"
-    orderBy="-churnRiskPercentage">
+    orderBy="accountId">
     <field name="accountId"/>
     <field name="siteId"/>
     <field name="customerName"/>
