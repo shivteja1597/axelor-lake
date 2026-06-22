@@ -227,7 +227,7 @@
   </action-view>
 
   <action-view name="dashlet.lake.customer.predictions.grid"
-    title="Customer Predictions" model="com.axelor.lake.db.LakeCustomerPrediction" limit="40">
+    title="Customer Predictions" model="com.axelor.lake.db.LakeCustomerPrediction">
     <view type="grid" name="lake-customer-prediction-grid"/>
     <view type="form" name="lake-customer-prediction-form"/>
   </action-view>
