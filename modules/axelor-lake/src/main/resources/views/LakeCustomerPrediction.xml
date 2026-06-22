@@ -5,7 +5,8 @@
   https://axelor.com/xml/ns/object-views/object-views_8.1.xsd">
 
   <grid name="lake-customer-prediction-grid" title="Customer Predictions"
-    model="com.axelor.lake.db.LakeCustomerPrediction">
+    model="com.axelor.lake.db.LakeCustomerPrediction"
+    canNew="false" canEdit="false" canDelete="false" edit-icon="false">
     <field name="accountId"/>
     <field name="siteId"/>
     <field name="customerName"/>
@@ -18,7 +19,8 @@
   </grid>
 
   <form name="lake-customer-prediction-form" title="Customer Prediction Details"
-    model="com.axelor.lake.db.LakeCustomerPrediction" width="large">
+    model="com.axelor.lake.db.LakeCustomerPrediction" width="large"
+    canNew="false" canEdit="false" canDelete="false">
     <panel name="infoPanel" title="Customer Information">
       <field name="accountId"/>
       <field name="siteId"/>
