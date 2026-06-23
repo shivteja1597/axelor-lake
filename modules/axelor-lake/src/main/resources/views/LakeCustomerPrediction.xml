@@ -37,7 +37,7 @@
       <field name="riskSegment" title="Risk Segment"/>
     </panel>
     <panel name="shapPanel" title="Risk Drivers (SHAP Breakdown)">
-      <field name="baseRisk" title="Base Risk (%)" readonly="true"/>
+      <field name="baseRisk" title="Base Risk (%)" readonly="true" colSpan="12"/>
       <field name="positiveRiskDrivers" title="Increasing Risk Factors" readonly="true"
         widget="Text" colSpan="6" height="10"/>
       <field name="negativeRiskDrivers" title="Decreasing Risk Factors" readonly="true"
